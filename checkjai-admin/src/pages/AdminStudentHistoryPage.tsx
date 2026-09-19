@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { supabase, supabaseAdmin } from '../lib/supabase'
 import { adminFetch, clearTeacherSession, getTeacherToken } from '../lib/teacherSession'
 import type { StudentHistoryRow, StudentProfileLite, BubbleLetterRow } from '../types/assessmentAdmin'
 
@@ -70,34 +71,90 @@ export default function AdminStudentHistoryPage() {
   const [metrics, setMetrics] = useState<RecordMetrics[]>([])
 
   useEffect(() => {
-    if (!getTeacherToken()) {
-      navigate('/admin/login', { replace: true })
-      return
-    }
     let cancelled = false
     ;(async () => {
       setLoading(true)
       setError(null)
       try {
-        const res = await adminFetch(`/api/admin/students/${encodeURIComponent(studentId)}/history`)
-        const json = (await res.json()) as ApiResponse
-        if (res.status === 401) {
-          clearTeacherSession()
-          navigate('/admin/login', { replace: true })
-          return
+        let [{ data: sData, error: sErr }, { data: trData, error: trErr }] = await Promise.all([
+          supabase
+            .from('students')
+            .select('student_id, full_name, faculty, major, year_level')
+            .eq('student_id', studentId)
+            .maybeSingle(),
+          supabase
+            .from('test_results')
+            .select('id, student_id, stress_level, dass_score, eq_score, raw_answers, created_at')
+            .eq('student_id', studentId)
+            .order('created_at', { ascending: false }),
+        ])
+
+        if (!sData || !trData || trData.length === 0) {
+          const [adminS, adminTr] = await Promise.all([
+            supabaseAdmin
+              .from('students')
+              .select('student_id, full_name, faculty, major, year_level')
+              .eq('student_id', studentId)
+              .maybeSingle(),
+            supabaseAdmin
+              .from('test_results')
+              .select('id, student_id, stress_level, dass_score, eq_score, raw_answers, created_at')
+              .eq('student_id', studentId)
+              .order('created_at', { ascending: false }),
+          ])
+          if (adminS.data) sData = adminS.data
+          if (adminTr.data && adminTr.data.length > 0) trData = adminTr.data
         }
-        if (!res.ok || !json.ok) {
-          setError(json.message ?? 'โหลดประวัติไม่สำเร็จ')
-          return
-        }
+
         if (cancelled) return
-        setStudent(json.student ?? null)
-        const rows = json.history ?? []
+
+        if (sErr) {
+          setError(`ดึงข้อมูลนักศึกษาไม่สำเร็จ: ${sErr.message}`)
+          return
+        }
+
+        setStudent(
+          sData
+            ? {
+                student_id: sData.student_id,
+                full_name: sData.full_name,
+                faculty: sData.faculty,
+                major: sData.major,
+                year_level: sData.year_level,
+              }
+            : {
+                student_id: studentId,
+                full_name: null,
+                faculty: null,
+                major: null,
+                year_level: null,
+              }
+        )
+
+        const rows: StudentHistoryRow[] = (trData || []).map((tr: any) => {
+          const dass = tr.dass_score || {}
+          const eq = tr.eq_score || {}
+          const raw = tr.raw_answers || {}
+
+          return {
+            id: tr.id,
+            created_at: tr.created_at,
+            eq_total_score: Number(eq.total ?? 0),
+            eq_answers: raw.eq_answers || [],
+            dass_answers: raw.dass_answers || [],
+            dass_depression: { raw: 0, doubled: Number(dass.depression ?? 0), severity: 'normal' as any, labelTh: '' },
+            dass_anxiety: { raw: 0, doubled: Number(dass.anxiety ?? 0), severity: 'normal' as any, labelTh: '' },
+            dass_stress: { raw: 0, doubled: Number(dass.stress ?? 0), severity: 'normal' as any, labelTh: tr.stress_level || '' },
+          }
+        })
+
         setHistory(rows)
-        setBubbleLetters(json.bubble_letters ?? [])
         setMetrics(rows.map((r) => computeMetrics(r)))
-      } catch {
-        if (!cancelled) setError('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้')
+      } catch (err: unknown) {
+        if (!cancelled) {
+          const msg = err instanceof Error ? err.message : String(err)
+          setError(`เชื่อมต่อฐานข้อมูลไม่สำเร็จ: ${msg}`)
+        }
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -105,7 +162,7 @@ export default function AdminStudentHistoryPage() {
     return () => {
       cancelled = true
     }
-  }, [navigate, studentId])
+  }, [studentId])
 
   const handleBulkExportExcel = () => {
     const wb = utils.book_new()

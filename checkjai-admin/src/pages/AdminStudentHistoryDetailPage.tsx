@@ -1,27 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { adminFetch, clearTeacherSession, getTeacherToken } from '../lib/teacherSession'
+import { supabase, supabaseAdmin } from '../lib/supabase'
 import type { StudentHistoryRow, StudentProfileLite } from '../types/assessmentAdmin'
 import { DASS21_CHOICES_TH, DASS21_QUESTIONS_TH } from '../lib/dass21Score'
 import { EQ_CHOICES_TH, EQ_QUESTIONS_TH } from '../lib/eqQuestions'
-
-type ApiResponse = {
-  ok?: boolean
-  message?: string
-  student?: StudentProfileLite
-  history?: StudentHistoryRow[]
-}
-
 import { utils, writeFile } from 'xlsx'
-
-function formatMonthYearTh(iso: string): string {
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return iso
-  return d.toLocaleDateString('th-TH', {
-    month: 'short',
-    year: 'numeric',
-  })
-}
 
 function formatFullDateTh(iso: string): string {
   const d = new Date(iso)
@@ -42,293 +25,306 @@ export default function AdminStudentHistoryDetailPage() {
   const [history, setHistory] = useState<StudentHistoryRow[]>([])
 
   useEffect(() => {
-    if (!getTeacherToken()) {
-      navigate('/admin/login', { replace: true })
-      return
-    }
     let cancelled = false
     ;(async () => {
       setLoading(true)
       setError(null)
       try {
-        const res = await adminFetch(`/api/admin/students/${encodeURIComponent(studentId)}/history`)
-        const json = (await res.json()) as ApiResponse
-        if (res.status === 401) {
-          clearTeacherSession()
-          navigate('/admin/login', { replace: true })
-          return
+        let [{ data: sData }, { data: trData }] = await Promise.all([
+          supabase
+            .from('students')
+            .select('student_id, full_name, faculty, major, year_level')
+            .eq('student_id', studentId)
+            .maybeSingle(),
+          supabase
+            .from('test_results')
+            .select('id, student_id, stress_level, dass_score, eq_score, raw_answers, created_at')
+            .eq('student_id', studentId)
+            .order('created_at', { ascending: false }),
+        ])
+
+        if (!sData || !trData || trData.length === 0) {
+          const [adminS, adminTr] = await Promise.all([
+            supabaseAdmin
+              .from('students')
+              .select('student_id, full_name, faculty, major, year_level')
+              .eq('student_id', studentId)
+              .maybeSingle(),
+            supabaseAdmin
+              .from('test_results')
+              .select('id, student_id, stress_level, dass_score, eq_score, raw_answers, created_at')
+              .eq('student_id', studentId)
+              .order('created_at', { ascending: false }),
+          ])
+          if (adminS.data) sData = adminS.data
+          if (adminTr.data && adminTr.data.length > 0) trData = adminTr.data
         }
-        if (!res.ok || !json.ok) {
-          setError(json.message ?? 'โหลดประวัติไม่สำเร็จ')
-          return
-        }
+
         if (cancelled) return
-        setStudent(json.student ?? null)
-        setHistory(json.history ?? [])
-      } catch {
-        if (!cancelled) setError('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้')
+
+        setStudent(
+          sData
+            ? {
+                student_id: sData.student_id,
+                full_name: sData.full_name,
+                faculty: sData.faculty,
+                major: sData.major,
+                year_level: sData.year_level,
+              }
+            : {
+                student_id: studentId,
+                full_name: null,
+                faculty: null,
+                major: null,
+                year_level: null,
+              }
+        )
+
+        const rows: StudentHistoryRow[] = (trData || []).map((tr: any) => {
+          const dass = tr.dass_score || {}
+          const eq = tr.eq_score || {}
+          const raw = tr.raw_answers || {}
+
+          return {
+            id: tr.id,
+            created_at: tr.created_at,
+            eq_total_score: Number(eq.total ?? 0),
+            eq_answers: raw.eq_answers || [],
+            dass_answers: raw.dass_answers || [],
+            dass_depression: { raw: 0, doubled: Number(dass.depression ?? 0), severity: 'normal' as any, labelTh: '' },
+            dass_anxiety: { raw: 0, doubled: Number(dass.anxiety ?? 0), severity: 'normal' as any, labelTh: '' },
+            dass_stress: { raw: 0, doubled: Number(dass.stress ?? 0), severity: 'normal' as any, labelTh: tr.stress_level || '' },
+          }
+        })
+
+        setHistory(rows)
+      } catch (err: unknown) {
+        if (!cancelled) {
+          const msg = err instanceof Error ? err.message : String(err)
+          setError(`โหลดรายละเอียดไม่สำเร็จ: ${msg}`)
+        }
       } finally {
         if (!cancelled) setLoading(false)
       }
     })()
+
     return () => {
       cancelled = true
     }
-  }, [navigate, studentId])
+  }, [studentId])
 
-  const selected = useMemo(
-    () => history.find((h) => h.id === submissionId) ?? history[0] ?? null,
-    [history, submissionId],
-  )
-
-  const eqAnswers = Array.isArray(selected?.eq_answers) ? selected?.eq_answers ?? [] : []
-  const dassAnswers = Array.isArray(selected?.dass_answers) ? selected?.dass_answers ?? [] : []
-
-  const eqPct = Math.max(0, Math.min(100, Math.round(((selected?.eq_total_score ?? 0) / 208) * 100)))
-  const depPct = Math.max(
-    0,
-    Math.min(100, Math.round(((selected?.dass_depression?.doubled ?? 0) / 42) * 100)),
-  )
-  const anxPct = Math.max(
-    0,
-    Math.min(100, Math.round(((selected?.dass_anxiety?.doubled ?? 0) / 42) * 100)),
-  )
-  const strPct = Math.max(
-    0,
-    Math.min(100, Math.round(((selected?.dass_stress?.doubled ?? 0) / 42) * 100)),
-  )
-
-  const mentalDep = Math.max(0, 100 - depPct)
-  const mentalAnx = Math.max(0, 100 - anxPct)
-  const mentalStr = Math.max(0, 100 - strPct)
-  const mentalAvg = Math.round((mentalDep + mentalAnx + mentalStr) / 3)
-
-  const radarAxes = [
-    { label: 'EQ', valueEq: eqPct, valueMh: mentalAvg },
-    { label: 'Depression', valueEq: eqPct, valueMh: mentalDep },
-    { label: 'Anxiety', valueEq: eqPct, valueMh: mentalAnx },
-    { label: 'Stress', valueEq: eqPct, valueMh: mentalStr },
-  ]
-  const radarCenter = 135
-  const radarRadius = 90
-  const radarEqPoints = radarAxes
-    .map((a, idx) => {
-      const angle = -Math.PI / 2 + ((Math.PI * 2 * idx) / radarAxes.length)
-      const r = (a.valueEq / 100) * radarRadius
-      const x = radarCenter + Math.cos(angle) * r
-      const y = radarCenter + Math.sin(angle) * r
-      return `${x},${y}`
-    })
-    .join(' ')
-
-  const radarMhPoints = radarAxes
-    .map((a, idx) => {
-      const angle = -Math.PI / 2 + ((Math.PI * 2 * idx) / radarAxes.length)
-      const r = (a.valueMh / 100) * radarRadius
-      const x = radarCenter + Math.cos(angle) * r
-      const y = radarCenter + Math.sin(angle) * r
-      return `${x},${y}`
-    })
-    .join(' ')
+  const currentRecord = useMemo(() => {
+    if (!history.length) return null
+    if (submissionId) {
+      return history.find((h) => String(h.id) === String(submissionId)) ?? history[0]
+    }
+    return history[0]
+  }, [history, submissionId])
 
   const handleExportExcel = () => {
-    if (!selected) return
+    if (!currentRecord) return
 
     const wb = utils.book_new()
 
-    // 1. Sheet "Summary"
-    const summaryData = [
+    // 1. Profile Sheet
+    const profileData = [
       ['ข้อมูลนักศึกษา'],
-      ['รหัสนักศึกษา', student?.student_id ?? studentId],
-      ['ชื่อ-นามสกุล', student?.full_name ?? '-'],
+      ['รหัสนักศึกษา', student?.student_id || studentId],
+      ['ชื่อ-นามสกุล', student?.full_name || '-'],
       ['คณะ', student?.faculty?.trim() || '-'],
       ['สาขา', student?.major?.trim() || '-'],
       ['ชั้นปี', student?.year_level ?? '-'],
-      ['วันที่ทำแบบทดสอบ', formatFullDateTh(selected.created_at)],
-      [''],
-      ['สรุปผลคะแนน'],
-      ['DASS-21 - ซึมเศร้า', `${selected.dass_depression?.doubled ?? 0} (${selected.dass_depression?.labelTh ?? '-'})`],
-      ['DASS-21 - วิตกกังวล', `${selected.dass_anxiety?.doubled ?? 0} (${selected.dass_anxiety?.labelTh ?? '-'})`],
-      ['DASS-21 - ความเครียด', `${selected.dass_stress?.doubled ?? 0} (${selected.dass_stress?.labelTh ?? '-'})`],
-      ['EQ รวม', `${selected.eq_total_score ?? 0} / 208`],
-      ['สุขภาพจิตใจรวม (Mental Wellbeing)', `${mentalAvg} / 100`],
+      ['วันที่ทำแบบประเมิน', formatFullDateTh(currentRecord.created_at)],
     ]
-    const wsSummary = utils.aoa_to_sheet(summaryData)
-    utils.book_append_sheet(wb, wsSummary, 'สรุปผล')
+    const profileWs = utils.aoa_to_sheet(profileData)
+    utils.book_append_sheet(wb, profileWs, 'ข้อมูลส่วนตัว')
 
-    // 2. Sheet "Detailed Answers"
-    const detailsData: any[][] = [
-      ['ข้อที่', 'หมวดหมู่', 'คำถาม', 'คะแนน', 'คำตอบ'],
-    ]
-
-    // DASS Answers
-    DASS21_QUESTIONS_TH.forEach((q, idx) => {
-      const score = dassAnswers[idx] ?? 0
-      const ans = typeof dassAnswers[idx] === 'number' ? DASS21_CHOICES_TH[dassAnswers[idx] ?? 0] : '-'
-      detailsData.push([idx + 1, 'DASS-21', q, score, ans])
+    // 2. DASS-21 Sheet
+    const dassAnswers = currentRecord.dass_answers || []
+    const dassExport = DASS21_QUESTIONS_TH.map((q, idx) => {
+      const val = dassAnswers[idx]
+      const choiceText = val !== undefined && val !== null ? DASS21_CHOICES_TH[val] || String(val) : 'ไม่ได้ตอบ'
+      return {
+        'ข้อที่': idx + 1,
+        'คำถาม DASS-21': q,
+        'คำตอบ': choiceText,
+        'คะแนน (0-3)': val !== undefined && val !== null ? val : '-',
+      }
     })
+    const dassWs = utils.json_to_sheet(dassExport)
+    utils.book_append_sheet(wb, dassWs, 'ผลลัพธ์ DASS-21')
 
-    // EQ Answers
-    EQ_QUESTIONS_TH.forEach((q, idx) => {
-      const score = eqAnswers[idx] ?? 0
-      const ans = typeof eqAnswers[idx] === 'number' ? EQ_CHOICES_TH[eqAnswers[idx] ?? 0] : '-'
-      detailsData.push([idx + 1, 'EQ', q, score, ans])
+    // 3. EQ Sheet
+    const eqAnswers = currentRecord.eq_answers || []
+    const eqExport = EQ_QUESTIONS_TH.map((q, idx) => {
+      const val = eqAnswers[idx]
+      const choiceText = val !== undefined && val !== null ? EQ_CHOICES_TH[val] || String(val) : 'ไม่ได้ตอบ'
+      return {
+        'ข้อที่': idx + 1,
+        'คำถาม EQ': q,
+        'คำตอบ': choiceText,
+        'คะแนนดิบ (0-3)': val !== undefined && val !== null ? val : '-',
+      }
     })
+    const eqWs = utils.json_to_sheet(eqExport)
+    utils.book_append_sheet(wb, eqWs, 'ผลลัพธ์ EQ')
 
-    const wsDetails = utils.aoa_to_sheet(detailsData)
-    utils.book_append_sheet(wb, wsDetails, 'คำตอบโดยละเอียด')
+    writeFile(wb, `CheckJai_Result_${student?.student_id || studentId}_${currentRecord.id}.xlsx`)
+  }
 
-    // Download
-    const fileName = `Assessment_${studentId}_${selected.created_at.split('T')[0]}.xlsx`
-    writeFile(wb, fileName)
+  if (loading) {
+    return (
+      <div className="aj-searchPage">
+        <div style={{ padding: '40px', textAlign: 'center', color: '#64748b' }}>
+          กำลังโหลดรายละเอียด...
+        </div>
+      </div>
+    )
+  }
+
+  if (error || !currentRecord) {
+    return (
+      <div className="aj-searchPage">
+        <header className="aj-searchHeader">
+          <button
+            type="button"
+            className="aj-searchBtnBack"
+            onClick={() => navigate(`/admin/search/${studentId}/history`)}
+          >
+            ← ย้อนกลับ
+          </button>
+          <h1 className="aj-searchTitle">รายละเอียดผลการทำแบบประเมิน</h1>
+        </header>
+        <div style={{ padding: '40px', color: '#e11d48', background: '#ffe4e6', borderRadius: '8px' }}>
+          {error || 'ไม่พบผลการประเมินชุดนี้'}
+        </div>
+      </div>
+    )
   }
 
   return (
-    <div className="aj-historyPage">
-      <header className="aj-searchHeader" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
-        <div>
-          <h1 className="aj-searchTitle">Search</h1>
-          <p className="aj-searchCrumb">
-            <button type="button" className="aj-searchCrumbLink" onClick={() => navigate('/admin/search')}>
-              Search
-            </button>
-            {' > '}
-            <button
-              type="button"
-              className="aj-searchCrumbLink"
-              onClick={() => navigate(`/admin/search/${encodeURIComponent(studentId)}/history`)}
-            >
-              History
-            </button>
-            {' > Detail'}
-          </p>
+    <div className="aj-searchPage">
+      <header className="aj-searchHeader" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <button
+            type="button"
+            className="aj-searchBtnBack"
+            onClick={() => navigate(`/admin/search/${studentId}/history`)}
+          >
+            ← ย้อนกลับ
+          </button>
+          <h1 className="aj-searchTitle">รายละเอียดผลประเมิน ({formatFullDateTh(currentRecord.created_at)})</h1>
         </div>
+
         <button
           type="button"
           onClick={handleExportExcel}
-          className="aj-searchBtnExport"
+          style={{
+            background: '#10b981',
+            color: 'white',
+            border: 'none',
+            padding: '10px 20px',
+            borderRadius: '8px',
+            fontWeight: 700,
+            cursor: 'pointer',
+            fontSize: '14px',
+          }}
         >
-          📊 Export Excel
+          📊 Export Excel ชุดนี้
         </button>
       </header>
 
-      {error ? <p className="aj-searchBanner">{error}</p> : null}
-
-      <section className="aj-historyProfile">
-        <h2 className="aj-historyName">
-          {student?.student_id ?? studentId} {student?.full_name ? ` ${student.full_name}` : ''}
-        </h2>
-        <p>รหัสนักศึกษา : {student?.student_id ?? studentId}</p>
-        <p>คณะ : {student?.faculty?.trim() || '-'}</p>
-        <p>เดือน / ปี : {selected?.created_at ? formatMonthYearTh(selected.created_at) : '-'}</p>
-        <p>ชั้นปี : {student?.year_level != null ? student.year_level : '-'}</p>
-        <p>สาขา : {student?.major?.trim() || '-'}</p>
+      {/* Profile Header Card */}
+      <section className="aj-searchPanel" style={{ marginBottom: '24px' }}>
+        <h2 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '16px', color: '#0b1139' }}>ข้อมูลผู้ประเมิน</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+          <div><strong>รหัสนักศึกษา:</strong> {student?.student_id || studentId}</div>
+          <div><strong>ชื่อ-นามสกุล:</strong> {student?.full_name || '-'}</div>
+          <div><strong>คณะ:</strong> {student?.faculty || '-'}</div>
+          <div><strong>สาขาวิชา:</strong> {student?.major || '-'}</div>
+          <div><strong>ชั้นปี:</strong> {student?.year_level || '-'}</div>
+        </div>
       </section>
 
-      {loading ? (
-        <p className="aj-searchTdMuted">กำลังโหลด...</p>
-      ) : !selected ? (
-        <p className="aj-searchTdMuted">ไม่พบรายการที่เลือก</p>
-      ) : (
-        <>
-          <div className="aj-historyChartCard">
-            <h3>ข้อมูลเชิงลึก</h3>
-            <svg viewBox="0 0 270 270" className="aj-radarSvg" aria-label="กราฟสรุปคะแนน">
-              {[1, 2, 3, 4, 5].map((n) => {
-                const rr = (radarRadius * n) / 5
-                const points = radarAxes
-                  .map((_, idx) => {
-                    const angle = -Math.PI / 2 + ((Math.PI * 2 * idx) / radarAxes.length)
-                    const x = radarCenter + Math.cos(angle) * rr
-                    const y = radarCenter + Math.sin(angle) * rr
-                    return `${x},${y}`
-                  })
-                  .join(' ')
-                return <polygon key={n} points={points} fill="none" stroke="rgba(35, 46, 122, 0.24)" strokeWidth="1" />
-              })}
-              {radarAxes.map((a, idx) => {
-                const angle = -Math.PI / 2 + ((Math.PI * 2 * idx) / radarAxes.length)
-                const x = radarCenter + Math.cos(angle) * radarRadius
-                const y = radarCenter + Math.sin(angle) * radarRadius
-                const lx = radarCenter + Math.cos(angle) * (radarRadius + 20)
-                const ly = radarCenter + Math.sin(angle) * (radarRadius + 20)
-                return (
-                  <g key={a.label}>
-                    <line x1={radarCenter} y1={radarCenter} x2={x} y2={y} stroke="rgba(35,46,122,.35)" />
-                    <text x={lx} y={ly} textAnchor="middle" className="aj-radarLabel">
-                      {a.label}
-                    </text>
-                  </g>
-                )
-              })}
-              <polygon points={radarEqPoints} fill="rgba(229, 88, 183, 0.33)" stroke="#ce4ea8" strokeWidth="2" />
-              <polygon points={radarMhPoints} fill="rgba(81, 204, 226, 0.40)" stroke="#2aa6c2" strokeWidth="2" />
-            </svg>
-            <div className="aj-radarLegend2">
-              <p><span className="aj-radarLegendDot aj-radarLegendDot--eq" /> แบบทดสอบทางอารมณ์ (EQ)</p>
-              <p><span className="aj-radarLegendDot aj-radarLegendDot--mh" /> แบบทดสอบสุขภาพจิตใจ (DASS-21)</p>
-            </div>
+      {/* Summary Score Card */}
+      <section className="aj-searchPanel" style={{ marginBottom: '24px' }}>
+        <h2 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '16px', color: '#0b1139' }}>สรุปผลคะแนน</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
+          <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '8px', borderLeft: '4px solid #3b82f6' }}>
+            <span style={{ fontSize: '13px', color: '#64748b' }}>ภาวะซึมเศร้า (Depression)</span>
+            <div style={{ fontSize: '24px', fontWeight: 700, color: '#1e293b' }}>{currentRecord.dass_depression?.doubled ?? 0} คะแนน</div>
           </div>
-
-          <div className="aj-historyMetaScore">
-            <p>
-              <strong>DASS-21</strong>: ซึมเศร้า {selected?.dass_depression?.labelTh ?? '-'} / วิตกกังวล {selected?.dass_anxiety?.labelTh ?? '-'} / เครียด {selected?.dass_stress?.labelTh ?? '-'}
-            </p>
-            <p>
-              <strong>EQ รวม</strong>: {selected?.eq_total_score ?? '-'} / 208
-            </p>
-            <p>
-              <strong>สุขภาพจิตใจ (กลับแกนจาก DASS)</strong>: {mentalAvg} / 100
-            </p>
+          <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '8px', borderLeft: '4px solid #10b981' }}>
+            <span style={{ fontSize: '13px', color: '#64748b' }}>ภาวะวิตกกังวล (Anxiety)</span>
+            <div style={{ fontSize: '24px', fontWeight: 700, color: '#1e293b' }}>{currentRecord.dass_anxiety?.doubled ?? 0} คะแนน</div>
           </div>
+          <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '8px', borderLeft: '4px solid #f59e0b' }}>
+            <span style={{ fontSize: '13px', color: '#64748b' }}>ความเครียด (Stress)</span>
+            <div style={{ fontSize: '24px', fontWeight: 700, color: '#1e293b' }}>{currentRecord.dass_stress?.doubled ?? 0} คะแนน</div>
+            <div style={{ fontSize: '12px', color: '#d97706', marginTop: '4px' }}>ระดับ: {currentRecord.dass_stress?.labelTh || 'ปกติ'}</div>
+          </div>
+          <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '8px', borderLeft: '4px solid #8b5cf6' }}>
+            <span style={{ fontSize: '13px', color: '#64748b' }}>คะแนนรวม EQ</span>
+            <div style={{ fontSize: '24px', fontWeight: 700, color: '#1e293b' }}>{currentRecord.eq_total_score ?? 0} คะแนน</div>
+          </div>
+        </div>
+      </section>
 
-          <div className="aj-answerBlock">
-            <h3 className="aj-historyItemTitle">แบบทดสอบสุขภาพจิต DASS-21</h3>
-            <table className="aj-answerTable">
-              <thead>
-                <tr>
-                  <th>คำถาม</th>
-                  <th>คำตอบ</th>
+      {/* DASS-21 Itemized Details */}
+      <section className="aj-searchPanel" style={{ marginBottom: '24px', overflowX: 'auto' }}>
+        <h2 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '16px', color: '#0b1139' }}>รายละเอียดคำตอบ DASS-21 (21 ข้อ)</h2>
+        <table className="aj-searchTable">
+          <thead>
+            <tr>
+              <th style={{ width: '80px' }}>ข้อที่</th>
+              <th>คำถาม DASS-21</th>
+              <th style={{ width: '200px' }}>คำตอบ</th>
+              <th style={{ width: '100px', textAlign: 'center' }}>คะแนน</th>
+            </tr>
+          </thead>
+          <tbody>
+            {DASS21_QUESTIONS_TH.map((q, idx) => {
+              const val = currentRecord.dass_answers?.[idx]
+              return (
+                <tr key={idx}>
+                  <td>{idx + 1}</td>
+                  <td>{q}</td>
+                  <td>{val !== undefined && val !== null ? DASS21_CHOICES_TH[val] || String(val) : 'ไม่ได้ตอบ'}</td>
+                  <td style={{ textAlign: 'center', fontWeight: 700 }}>{val !== undefined && val !== null ? val : '-'}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {DASS21_QUESTIONS_TH.map((q, idx) => {
-                  const ans = typeof dassAnswers[idx] === 'number' ? DASS21_CHOICES_TH[dassAnswers[idx] ?? 0] : '-'
-                  return (
-                    <tr key={`dass-${idx + 1}`}>
-                      <td>{idx + 1}. {q}</td>
-                      <td>{ans}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
+              )
+            })}
+          </tbody>
+        </table>
+      </section>
 
-          <div className="aj-answerBlock">
-            <h3 className="aj-historyItemTitle">แบบทดสอบความฉลาดทางอารมณ์ EQ</h3>
-            <table className="aj-answerTable">
-              <thead>
-                <tr>
-                  <th>คำถาม</th>
-                  <th>คำตอบ</th>
+      {/* EQ Itemized Details */}
+      <section className="aj-searchPanel" style={{ overflowX: 'auto' }}>
+        <h2 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '16px', color: '#0b1139' }}>รายละเอียดคำตอบ EQ (52 ข้อ)</h2>
+        <table className="aj-searchTable">
+          <thead>
+            <tr>
+              <th style={{ width: '80px' }}>ข้อที่</th>
+              <th>คำถาม EQ</th>
+              <th style={{ width: '200px' }}>คำตอบ</th>
+              <th style={{ width: '100px', textAlign: 'center' }}>คะแนนดิบ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {EQ_QUESTIONS_TH.map((q, idx) => {
+              const val = currentRecord.eq_answers?.[idx]
+              return (
+                <tr key={idx}>
+                  <td>{idx + 1}</td>
+                  <td>{q}</td>
+                  <td>{val !== undefined && val !== null ? EQ_CHOICES_TH[val] || String(val) : 'ไม่ได้ตอบ'}</td>
+                  <td style={{ textAlign: 'center', fontWeight: 700 }}>{val !== undefined && val !== null ? val : '-'}</td>
                 </tr>
-              </thead>
-              <tbody>
-                {EQ_QUESTIONS_TH.map((q, idx) => {
-                  const ans = typeof eqAnswers[idx] === 'number' ? EQ_CHOICES_TH[eqAnswers[idx] ?? 0] : '-'
-                  return (
-                    <tr key={`eq-${idx + 1}`}>
-                      <td>{idx + 1}. {q}</td>
-                      <td>{ans}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
+              )
+            })}
+          </tbody>
+        </table>
+      </section>
     </div>
   )
 }

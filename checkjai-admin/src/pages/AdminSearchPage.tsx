@@ -1,30 +1,19 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { flushSync } from 'react-dom'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import {
-  adminFetch,
-  getTeacherToken,
-  clearTeacherSession,
-} from '../lib/teacherSession'
-import { downloadAssessmentsExcel } from '../utils/exportAssessmentsExcel'
-import type { AssessmentListRow } from '../types/assessmentAdmin'
+import { supabase, supabaseAdmin } from '../lib/supabase'
 
-
-function buildMonthYearDropdown(): { value: string; label: string }[] {
-  const out: { value: string; label: string }[] = []
-  const now = new Date()
-  for (let i = 0; i < 36; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-    const cy = d.getFullYear()
-    const cm = d.getMonth() + 1
-    const value = `${cy}-${String(cm).padStart(2, '0')}`
-    const label = d.toLocaleDateString('th-TH', {
-      month: 'long',
-      year: 'numeric',
-    })
-    out.push({ value, label })
-  }
-  return out
+export interface DirectoryStudentRow {
+  student_id: string
+  full_name: string
+  faculty: string
+  major: string
+  year_level: string
+  latest_submission_at: string | null
+  status: string
+  d_score: number | null
+  a_score: number | null
+  s_score: number | null
+  eq_total_score: number | null
 }
 
 export default function AdminSearchPage() {
@@ -34,300 +23,174 @@ export default function AdminSearchPage() {
   const [faculty, setFaculty] = useState('')
   const [major, setMajor] = useState('')
   const [yearLevel, setYearLevel] = useState('')
-  const [status, setStatus] = useState('')
 
   const [faculties, setFaculties] = useState<string[]>([])
   const [majors, setMajors] = useState<string[]>([])
   const [facultyMajorMap, setFacultyMajorMap] = useState<Record<string, string[]>>({})
-  const [yearLevels, setYearLevels] = useState<number[]>([])
 
-  const [rows, setRows] = useState<AssessmentListRow[]>([])
-  const [totalCount, setTotalCount] = useState(0)
-  const [page, setPage] = useState(1)
-  const limit = 20
-
+  const [rows, setRows] = useState<DirectoryStudentRow[]>([])
   const [loading, setLoading] = useState(false)
-  const [exporting, setExporting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [configError, setConfigError] = useState<string | null>(null)
 
-  const [sort, setSort] = useState<
-    'id' | 'name' | 'faculty' | 'major' | 'year' | 'status'
-  >('id')
-  const [order, setOrder] = useState<'asc' | 'desc'>('asc')
-
-  const [selected, setSelected] = useState<Set<string>>(new Set())
-
-  const loadMeta = useCallback(async () => {
-    const res = await adminFetch('/api/admin/meta')
-    if (res.status === 401) {
-      clearTeacherSession()
-      navigate('/admin/login', { replace: true })
-      return
-    }
-    const json = (await res.json()) as {
-      ok?: boolean
-      faculties?: string[]
-      majors?: string[]
-      facultyMajorMap?: Record<string, string[]>
-      years?: number[]
-    }
-    if (res.ok && json.ok) {
-      setFaculties(json.faculties ?? [])
-      setMajors(json.majors ?? [])
-      setFacultyMajorMap(json.facultyMajorMap ?? {})
-      setYearLevels(json.years ?? [])
-    }
-  }, [navigate])
-
-  const buildQuery = useCallback(() => {
-    const p = new URLSearchParams()
-    if (studentQ.trim()) p.set('q', studentQ.trim())
-    if (faculty) p.set('faculty', faculty)
-    if (major) p.set('major', major)
-    if (yearLevel) p.set('year_level', yearLevel)
-    if (status) p.set('status', status)
-    p.set('page', String(page))
-    p.set('limit', String(limit))
-    p.set('sort', sort === 'id' ? 'student_id' : sort)
-    p.set('order', order)
-    return p.toString()
-  }, [studentQ, faculty, major, yearLevel, status, page, limit, sort, order])
-
-  const runSearch = useCallback(async () => {
-    setError(null)
-    setConfigError(null)
+  const loadData = useCallback(async () => {
     setLoading(true)
+    setError(null)
     try {
-      const qs = buildQuery()
-      const res = await adminFetch(`/api/admin/assessments?${qs}`)
-      const json = (await res.json()) as {
-        ok?: boolean
-        message?: string
-        rows?: AssessmentListRow[]
-        total?: number
+      let query = supabase
+        .from('students')
+        .select(`
+          student_id,
+          full_name,
+          faculty,
+          major,
+          year_level,
+          created_at,
+          test_results (
+            id,
+            stress_level,
+            dass_score,
+            eq_score,
+            created_at
+          )
+        `)
+
+      if (faculty) query = query.eq('faculty', faculty)
+      if (major) query = query.eq('major', major)
+      if (yearLevel) query = query.eq('year_level', yearLevel)
+
+      let { data, error: qErr } = await query
+
+      if ((!data || data.length === 0) && !qErr) {
+        let adminQuery = supabaseAdmin
+          .from('students')
+          .select(`
+            student_id,
+            full_name,
+            faculty,
+            major,
+            year_level,
+            created_at,
+            test_results (
+              id,
+              stress_level,
+              dass_score,
+              eq_score,
+              created_at
+            )
+          `)
+
+        if (faculty) adminQuery = adminQuery.eq('faculty', faculty)
+        if (major) adminQuery = adminQuery.eq('major', major)
+        if (yearLevel) adminQuery = adminQuery.eq('year_level', yearLevel)
+
+        const adminRes = await adminQuery
+        if (adminRes.data && adminRes.data.length > 0) {
+          data = adminRes.data
+          qErr = adminRes.error
+        }
       }
-      if (res.status === 401) {
-        clearTeacherSession()
-        navigate('/admin/login', { replace: true })
+
+      if (qErr) {
+        setError(`ดึงข้อมูลนักศึกษาไม่สำเร็จ: ${qErr.message}`)
+        setLoading(false)
         return
       }
-      if (res.status === 503) {
-        setConfigError(json.message ?? 'ยังตั้งค่า service role ไม่ครบ')
-        setRows([])
-        return
-      }
-      if (!res.ok || !json.ok) {
-        setError(json.message ?? 'โหลดข้อมูลไม่สำเร็จ')
-        setRows([])
-        return
-      }
-      setRows(json.rows ?? [])
-      setTotalCount(json.total ?? 0)
-      setSelected(new Set())
-    } catch {
-      setError('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้')
-      setRows([])
+
+      const allRows: DirectoryStudentRow[] = (data || []).map((s: any) => {
+        const results = Array.isArray(s.test_results) ? s.test_results : []
+        // Sort latest test result first
+        results.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        const latest = results[0]
+
+        const dass = latest?.dass_score || {}
+        const eq = latest?.eq_score || {}
+
+        return {
+          student_id: s.student_id,
+          full_name: s.full_name || s.student_id,
+          faculty: s.faculty || '-',
+          major: s.major || '-',
+          year_level: s.year_level || '-',
+          latest_submission_at: latest?.created_at || null,
+          status: latest ? (latest.stress_level || 'ทำแบบประเมินแล้ว') : 'ยังไม่ได้ทำแบบประเมิน',
+          d_score: latest ? Number(dass.depression ?? 0) : null,
+          a_score: latest ? Number(dass.anxiety ?? 0) : null,
+          s_score: latest ? Number(dass.stress ?? 0) : null,
+          eq_total_score: latest ? Number(eq.total ?? 0) : null,
+        }
+      })
+
+      // Extract faculties and majors dropdowns
+      const facSet = new Set<string>()
+      const majSet = new Set<string>()
+      const map: Record<string, string[]> = {}
+
+      allRows.forEach((r) => {
+        if (r.faculty && r.faculty !== '-') {
+          facSet.add(r.faculty)
+          if (!map[r.faculty]) map[r.faculty] = []
+          if (r.major && r.major !== '-' && !map[r.faculty].includes(r.major)) {
+            map[r.faculty].push(r.major)
+          }
+        }
+        if (r.major && r.major !== '-') majSet.add(r.major)
+      })
+
+      setFaculties(Array.from(facSet).sort())
+      setMajors(Array.from(majSet).sort())
+      setFacultyMajorMap(map)
+
+      // Filter by text search query
+      const filtered = allRows.filter((r) => {
+        if (!studentQ.trim()) return true
+        const q = studentQ.trim().toLowerCase()
+        return r.student_id.toLowerCase().includes(q) || r.full_name.toLowerCase().includes(q)
+      })
+
+      setRows(filtered)
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(`เกิดข้อผิดพลาด: ${msg}`)
     } finally {
       setLoading(false)
     }
-  }, [buildQuery, navigate])
-
-  const runSearchRef = useRef(runSearch)
-  runSearchRef.current = runSearch
+  }, [studentQ, faculty, major, yearLevel])
 
   useEffect(() => {
-    if (!getTeacherToken()) {
-      navigate('/admin/login', { replace: true })
-      return
-    }
-    let cancelled = false
-    ;(async () => {
-      await loadMeta()
-      if (cancelled) return
-      await runSearchRef.current()
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [navigate, loadMeta, page])
-
-  const skipSortEffectOnce = useRef(true)
-  useEffect(() => {
-    if (!getTeacherToken()) return
-    if (skipSortEffectOnce.current) {
-      skipSortEffectOnce.current = false
-      return
-    }
-    void runSearchRef.current()
-  }, [sort, order])
-
-  function resetFilters() {
-    flushSync(() => {
-      setStudentQ('')
-      setFaculty('')
-      setMajor('')
-      setYearLevel('')
-      setStatus('')
-      setPage(1)
-      setSort('id')
-      setOrder('asc')
-    })
-    void runSearch()
-  }
-
-
-  function toggleSort(
-    key: 'id' | 'name' | 'faculty' | 'major' | 'year' | 'status',
-  ) {
-    if (sort === key) {
-      setOrder((o) => (o === 'asc' ? 'desc' : 'asc'))
-    } else {
-      setSort(key)
-      setOrder('asc')
-    }
-  }
-
-  const allSelected =
-    rows.length > 0 && rows.every((r) => selected.has(r.student_id))
-
-  function toggleAll() {
-    if (allSelected) {
-      setSelected(new Set())
-    } else {
-      setSelected(new Set(rows.map((r) => r.student_id)))
-    }
-  }
-
-  function toggleOne(id: string) {
-    setSelected((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
-
-  function displayName(r: AssessmentListRow) {
-    const n = r.full_name?.trim()
-    if (n) return n
-    if (r.student_id) return r.student_id
-    return '—'
-  }
-
-  function goToHistory(r: AssessmentListRow) {
-    const sid = (r.student_id ?? '').trim()
-    if (!sid) return
-    navigate(`/admin/search/${encodeURIComponent(sid)}/history`)
-  }
-
-  async function handleExportSelected() {
-    if (selected.size === 0) return
-    setExporting(true)
-    try {
-      const qs = new URLSearchParams()
-      qs.set('all', 'true')
-      qs.set('full_history', 'true')
-      qs.set('student_ids', Array.from(selected).join(','))
-      
-      const res = await adminFetch(`/api/admin/assessments?${qs.toString()}`)
-      const json = await res.json()
-      if (res.ok && json.ok) {
-        downloadAssessmentsExcel(json.rows ?? [], new Set())
-      } else {
-        alert(json.message ?? 'Export ไม่สำเร็จ')
-      }
-    } catch {
-      alert('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้')
-    } finally {
-      setExporting(false)
-    }
-  }
-
-  async function handleExportAll() {
-    setExporting(true)
-    try {
-      const qs = buildQuery()
-      // Force all=true and full_history=true
-      const exportQs = new URLSearchParams(qs)
-      exportQs.set('all', 'true')
-      exportQs.set('full_history', 'true')
-      
-      const res = await adminFetch(`/api/admin/assessments?${exportQs.toString()}`)
-      const json = await res.json()
-      if (res.ok && json.ok) {
-        downloadAssessmentsExcel(json.rows ?? [], new Set())
-      } else {
-        alert(json.message ?? 'Export ไม่สำเร็จ')
-      }
-    } catch {
-      alert('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้')
-    } finally {
-      setExporting(false)
-    }
-  }
+    void loadData()
+  }, [loadData])
 
   return (
     <div className="aj-searchPage aj-admin-theme">
       <header className="aj-searchHeader">
-        <h1 className="aj-searchTitle">Student Directory</h1>
-        <p className="aj-searchCrumb">
-          Admin &gt; Search
-        </p>
+        <h1 className="aj-searchTitle">รายชื่อและผลการประเมินนักศึกษา (Directory)</h1>
       </header>
 
-      {configError ? (
-        <p className="aj-searchBanner" role="alert">
-          {configError} — เพิ่ม `SUPABASE_SERVICE_ROLE_KEY` ในไฟล์ `.env` ของ
-          back-end แล้วรีสตาร์ท API
-        </p>
-      ) : null}
-
-      <section className="aj-searchPanel">
+      {/* Filter & Search Bar */}
+      <section className="aj-searchPanel" style={{ marginBottom: '24px' }}>
         <div className="aj-searchGrid">
           <label className="aj-searchField">
-            <span>รหัส หรือ ชื่อนักศึกษา</span>
+            <span>ค้นหา (รหัสนักศึกษา / ชื่อ-นามสกุล)</span>
             <input
               type="text"
+              className="aj-searchInput"
               value={studentQ}
               onChange={(e) => setStudentQ(e.target.value)}
-              placeholder="ค้นหารหัส หรือ ชื่อ..."
-              className="aj-searchInput"
+              placeholder="พิมพ์รหัสนักศึกษา หรือ ชื่อ..."
             />
           </label>
-          <label className="aj-searchField">
-            <span>ชั้นปี</span>
-            <select
-              className="aj-searchSelect"
-              value={yearLevel}
-              onChange={(e) => setYearLevel(e.target.value)}
-            >
-              <option value="">ทั้งหมด</option>
-              {[1, 2, 3, 4].map((y) => (
-                <option key={y} value={String(y)}>
-                  ปีที่ {y}
-                </option>
-              ))}
-              {yearLevels
-                .filter((y) => !([1, 2, 3, 4] as number[]).includes(y))
-                .map((y) => (
-                  <option key={y} value={String(y)}>
-                    ปีที่ {y}
-                  </option>
-                ))}
-            </select>
-          </label>
+
           <label className="aj-searchField">
             <span>คณะ</span>
             <select
-              className="aj-searchSelect"
               value={faculty}
               onChange={(e) => {
                 setFaculty(e.target.value)
-                setMajor('') // Reset major when faculty changes
+                setMajor('')
               }}
+              className="aj-searchSelect"
             >
-              <option value="">ทั้งหมด</option>
+              <option value="">ทั้งหมดทุกคณะ</option>
               {faculties.map((f) => (
                 <option key={f} value={f}>
                   {f}
@@ -335,14 +198,15 @@ export default function AdminSearchPage() {
               ))}
             </select>
           </label>
+
           <label className="aj-searchField">
             <span>สาขาวิชา</span>
             <select
-              className="aj-searchSelect"
               value={major}
               onChange={(e) => setMajor(e.target.value)}
+              className="aj-searchSelect"
             >
-              <option value="">ทั้งหมด</option>
+              <option value="">ทั้งหมดทุกสาขาวิชา</option>
               {(faculty ? facultyMajorMap[faculty] || [] : majors).map((m) => (
                 <option key={m} value={m}>
                   {m}
@@ -350,204 +214,100 @@ export default function AdminSearchPage() {
               ))}
             </select>
           </label>
+
           <label className="aj-searchField">
-            <span>สถานะ</span>
+            <span>ชั้นปี</span>
             <select
+              value={yearLevel}
+              onChange={(e) => setYearLevel(e.target.value)}
               className="aj-searchSelect"
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
             >
-              <option value="">ทั้งหมด</option>
-              <option value="Submitted">ทำแล้ว</option>
-              <option value="Pending">ยังไม่ทำ</option>
+              <option value="">ทั้งหมดทุกชั้นปี</option>
+              <option value="ปี 1">ปี 1</option>
+              <option value="ปี 2">ปี 2</option>
+              <option value="ปี 3">ปี 3</option>
+              <option value="ปี 4">ปี 4</option>
             </select>
           </label>
         </div>
-        <div className="aj-searchActions">
-          <button
-            type="button"
-            className="aj-searchBtnReset"
-            onClick={resetFilters}
-          >
-            Reset
-          </button>
-          <button
-            type="button"
-            className="aj-searchBtnPrimary"
-            onClick={() => void runSearch()}
-            disabled={loading}
-          >
-            Search
-          </button>
-        </div>
       </section>
 
-      <section className="aj-searchPanel aj-searchPanel--table">
-        <div className="aj-searchTableBar">
-          <button
-            type="button"
-            className="aj-searchBtnExport"
-            onClick={handleExportSelected}
-            disabled={rows.length === 0 || selected.size === 0 || exporting}
-            style={{ marginRight: '8px' }}
-          >
-            {exporting ? '...' : `Export รายการที่เลือก (${selected.size})`}
-          </button>
-          <button
-            type="button"
-            className="aj-searchBtnExport"
-            style={{ background: '#10b981', color: 'white' }}
-            onClick={handleExportAll}
-            disabled={totalCount === 0 || exporting}
-          >
-            {exporting ? 'กำลังส่งออก...' : `Export ทั้งหมดที่ค้นพบ (${totalCount})`}
-          </button>
+      {error ? (
+        <div style={{ color: '#e11d48', padding: '12px 16px', background: '#ffe4e6', borderRadius: '8px', marginBottom: '16px' }}>
+          {error}
         </div>
+      ) : null}
 
-        {error ? <p className="aj-searchError">{error}</p> : null}
-
-        <div className="aj-searchTableWrap w-full overflow-x-auto">
-          <table className="aj-searchTable">
-            <thead>
+      {/* Directory Table */}
+      <section className="aj-searchPanel" style={{ margin: 0, overflowX: 'auto' }}>
+        <table className="aj-searchTable">
+          <thead>
+            <tr>
+              <th>รหัสนักศึกษา</th>
+              <th>ชื่อ-นามสกุล</th>
+              <th>คณะ</th>
+              <th>สาขาวิชา</th>
+              <th>ชั้นปี</th>
+              <th>สถานะผลประเมินล่าสุด</th>
+              <th>คะแนน (D/A/S)</th>
+              <th>จัดการ</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.length === 0 ? (
               <tr>
-                <th className="aj-searchThCheck">
-                  <input
-                    type="checkbox"
-                    checked={allSelected}
-                    onChange={toggleAll}
-                    aria-label="เลือกทั้งหมด"
-                  />
-                </th>
-                <th>
-                  <button
-                    type="button"
-                    className="aj-sortBtn"
-                    onClick={() => toggleSort('id')}
-                  >
-                    รหัสนักศึกษา
-                    {sort === 'id' ? (order === 'asc' ? ' ↑' : ' ↓') : ''}
-                  </button>
-                </th>
-                <th>
-                  <button
-                    type="button"
-                    className="aj-sortBtn"
-                    onClick={() => toggleSort('name')}
-                  >
-                    ชื่อ - นามสกุล
-                    {sort === 'name' ? (order === 'asc' ? ' ↑' : ' ↓') : ''}
-                  </button>
-                </th>
-                <th>
-                  <button
-                    type="button"
-                    className="aj-sortBtn"
-                    onClick={() => toggleSort('faculty')}
-                  >
-                    คณะ
-                    {sort === 'faculty' ? (order === 'asc' ? ' ↑' : ' ↓') : ''}
-                  </button>
-                </th>
-                <th>
-                  <button
-                    type="button"
-                    className="aj-sortBtn"
-                    onClick={() => toggleSort('status')}
-                  >
-                    สถานะ
-                    {sort === 'status' ? (order === 'asc' ? ' ↑' : ' ↓') : ''}
-                  </button>
-                </th>
-                <th style={{ textAlign: 'center' }}>EQ</th>
-                <th style={{ textAlign: 'center' }}>Depression</th>
-                <th style={{ textAlign: 'center' }}>Anxiety</th>
-                <th style={{ textAlign: 'center' }}>Stress</th>
-                <th>ประวัติ</th>
+                <td colSpan={8} style={{ textAlign: 'center', padding: '40px', color: '#64748b' }}>
+                  {loading ? 'กำลังโหลดข้อมูล...' : 'ไม่พบข้อมูลนักศึกษาตามเงื่อนไขที่เลือก'}
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={6} className="aj-searchTdMuted">
-                    กำลังโหลด…
+            ) : (
+              rows.map((row) => (
+                <tr key={row.student_id}>
+                  <td><strong>{row.student_id}</strong></td>
+                  <td>{row.full_name}</td>
+                  <td>{row.faculty}</td>
+                  <td>{row.major}</td>
+                  <td>{row.year_level}</td>
+                  <td>
+                    <span
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: '9999px',
+                        fontSize: '12px',
+                        fontWeight: 600,
+                        backgroundColor: row.status.includes('รุนแรง') || row.status.includes('High') ? '#fee2e2' : row.latest_submission_at ? '#dcfce7' : '#f1f5f9',
+                        color: row.status.includes('รุนแรง') || row.status.includes('High') ? '#991b1b' : row.latest_submission_at ? '#166534' : '#475569',
+                      }}
+                    >
+                      {row.status}
+                    </span>
+                  </td>
+                  <td style={{ color: '#64748b' }}>
+                    {row.d_score !== null ? `D:${row.d_score} / A:${row.a_score} / S:${row.s_score}` : '-'}
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      onClick={() => navigate(`/admin/search/${row.student_id}/history`)}
+                      style={{
+                        background: '#3b82f6',
+                        color: 'white',
+                        border: 'none',
+                        padding: '6px 12px',
+                        borderRadius: '6px',
+                        cursor: 'pointer',
+                        fontSize: '13px',
+                        fontWeight: 600,
+                      }}
+                    >
+                      ดูประวัติ
+                    </button>
                   </td>
                 </tr>
-              ) : rows.length === 0 ? (
-                <tr>
-                  <td colSpan={6} className="aj-searchTdMuted">
-                    ไม่มีข้อมูล (หรือยังไม่มี student_profiles)
-                  </td>
-                </tr>
-              ) : (
-                rows.map((r) => (
-                  <tr key={r.student_id}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={selected.has(r.student_id)}
-                        onChange={() => toggleOne(r.student_id)}
-                        aria-label={`เลือก ${displayName(r)}`}
-                      />
-                    </td>
-                    <td>{r.student_id}</td>
-                    <td>{displayName(r)}</td>
-                    <td>{r.faculty?.trim() || '—'}</td>
-                    <td>
-                      <span className={`aj-statusBadge aj-statusBadge--${r.status.toLowerCase()}`}>
-                        {r.status === 'Submitted' ? 'ทำแล้ว' : 'ยังไม่ทำ'}
-                      </span>
-                    </td>
-                    <td style={{ textAlign: 'center', fontWeight: 700 }}>
-                      {r.eq_total_score ?? '-'}
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      {r.latest_depression_score ?? '-'}
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      {r.latest_anxiety_score ?? '-'}
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      {r.latest_stress_score ?? '-'}
-                    </td>
-                    <td>
-                      <button
-                        type="button"
-                        className="aj-searchLinkBtn"
-                        onClick={() => goToHistory(r)}
-                      >
-                        ดูประวัติ
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        <div className="aj-pagination">
-          <div className="aj-paginationInfo">
-            แสดง {rows.length} จาก {totalCount} รายการ (หน้า {page} จาก {Math.ceil(totalCount / limit) || 1})
-          </div>
-          <div className="aj-paginationBtns">
-            <button
-              type="button"
-              className="aj-paginationBtn"
-              disabled={page <= 1 || loading}
-              onClick={() => setPage(p => p - 1)}
-            >
-              &lt; ก่อนหน้า
-            </button>
-            <button
-              type="button"
-              className="aj-paginationBtn"
-              disabled={page >= Math.ceil(totalCount / limit) || loading}
-              onClick={() => setPage(p => p + 1)}
-            >
-              ถัดไป &gt;
-            </button>
-          </div>
-        </div>
+              ))
+            )}
+          </tbody>
+        </table>
       </section>
     </div>
   )

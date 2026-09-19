@@ -1,4 +1,16 @@
 {
+  "name": "checkjai-project",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently \"npm:dev:*\"",
+    "dev:api": "npm --prefix checkjai-api run dev",
+    "dev:admin": "npm --prefix checkjai-admin run dev",
+    "dev:student": "npm --prefix checkjai-student run dev",
+    "install:all": "npm install --prefix checkjai-api && npm install --prefix checkjai-admin && npm install --prefix checkjai-student"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2.101.1"
   }

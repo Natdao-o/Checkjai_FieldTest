@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { EQ_ANSWERS_KEY, saveEqAnswersJson } from '../lib/assessmentSession'
 import { EQ_CHOICES_TH as choices, EQ_QUESTIONS_TH as questions } from '../lib/eqQuestions'
 import TopBar from '../components/TopBar'
+import { useStudent } from '../context/StudentContext'
 import { getStudentId } from '../lib/auth'
 import bgImage from '../assets/images/รูปสำหรับแบบทดสอบ-6.jpg'
 import interImage from '../assets/images/รูปคั่นแบบทดสอบความฉลาดทางอารมณ์.jpg'
@@ -27,21 +28,22 @@ export default function QuizQuestionPage() {
   const [answers, setAnswers] = useState<(number | null)[]>(
     () => Array.from({ length: questions.length }, () => null),
   )
+  const { isIdentified } = useStudent()
   const [showInter, setShowInter] = useState(false)
 
   const currentAnswer = answers[index]
 
   useEffect(() => {
-    if (!getStudentId()) {
+    if (!isIdentified) {
       navigate('/login', { replace: true })
       return
     }
-    
+
     const stored = parseStoredEq52(sessionStorage.getItem(EQ_ANSWERS_KEY))
     if (stored) {
       navigate('/quiz/dass', { replace: true })
     }
-  }, [navigate])
+  }, [isIdentified, navigate])
 
   function selectChoice(choiceIndex: number) {
     setAnswers((prev) => {

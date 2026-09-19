@@ -7,10 +7,11 @@ import { clearEqAnswers, readEqAnswersJson, EQ_ANSWERS_KEY } from '../lib/assess
 import {
   DASS21_CHOICES_TH,
   DASS21_QUESTIONS_TH,
+  calculateDass21,
 } from '../lib/dass21Score'
-import { API_URL } from '../lib/apiConfig'
-
-const STUDENT_ID_KEY = 'checkjai_student_id'
+import { calculateEqTotal } from '../lib/eqScore'
+import { supabase } from '../lib/supabase'
+import { useStudent } from '../context/StudentContext'
 
 function parseEq52(raw: string | null): number[] | null {
   if (!raw) return null
@@ -30,6 +31,8 @@ function parseEq52(raw: string | null): number[] | null {
 
 export default function DassQuestionPage() {
   const navigate = useNavigate()
+  const { student, isIdentified } = useStudent()
+
   const [index, setIndex] = useState(0)
   const [answers, setAnswers] = useState<(number | null)[]>(
     () => Array.from({ length: DASS21_QUESTIONS_TH.length }, () => null),
@@ -41,7 +44,7 @@ export default function DassQuestionPage() {
   const currentAnswer = answers[index]
 
   useEffect(() => {
-    if (!sessionStorage.getItem(STUDENT_ID_KEY)) {
+    if (!isIdentified || !student?.student_id) {
       navigate('/login', { replace: true })
       return
     }
@@ -50,7 +53,7 @@ export default function DassQuestionPage() {
     if (!parseEq52(raw)) {
       navigate('/quiz/question', { replace: true })
     }
-  }, [navigate])
+  }, [isIdentified, student, navigate])
 
   function selectChoice(choiceIndex: number) {
     setAnswers((prev) => {
@@ -77,6 +80,14 @@ export default function DassQuestionPage() {
   async function submitBoth(dass: number[]) {
     setError(null)
     setSaving(true)
+
+    if (!student?.student_id) {
+      setError('ไม่พบข้อมูลนักศึกษา กรุณาระบุตัวตนก่อน')
+      setSaving(false)
+      navigate('/login', { replace: true })
+      return
+    }
+
     const rawEq = sessionStorage.getItem(EQ_ANSWERS_KEY)
     const eq = parseEq52(rawEq)
     if (!eq) {
@@ -85,28 +96,69 @@ export default function DassQuestionPage() {
       return
     }
 
-    const studentId = sessionStorage.getItem(STUDENT_ID_KEY)?.trim() || undefined
+    const dr = calculateDass21(dass)
+    const eqResult = calculateEqTotal(eq)
 
     try {
-      const res = await fetch(`${API_URL}/api/assessment/submit`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          student_id: studentId ?? null,
-          eq_answers: eq,
+      // Step A: Upsert/Insert student profile into 'students' table using anon client
+      const { error: studentErr } = await supabase.from('students').upsert(
+        {
+          student_id: student.student_id,
+          full_name: student.full_name,
+          faculty: student.faculty,
+          major: student.major,
+          year_level: student.year_level,
+        },
+        { onConflict: 'student_id' }
+      )
+
+      if (studentErr) {
+        // Fallback to direct insert if upsert encounters RLS update restriction
+        const { error: insertErr } = await supabase.from('students').insert({
+          student_id: student.student_id,
+          full_name: student.full_name,
+          faculty: student.faculty,
+          major: student.major,
+          year_level: student.year_level,
+        })
+        if (
+          insertErr &&
+          !insertErr.message?.includes('duplicate key') &&
+          insertErr.code !== '23505'
+        ) {
+          console.warn('Student profile insert warning:', insertErr.message)
+        }
+      }
+
+      // Step B: Insert test results into 'test_results' table using anon client (without .select())
+      const { error: testResultErr } = await supabase.from('test_results').insert({
+        student_id: student.student_id,
+        dass_score: {
+          depression: dr.depression.doubled,
+          anxiety: dr.anxiety.doubled,
+          stress: dr.stress.doubled,
+        },
+        eq_score: {
+          total: eqResult.total,
+        },
+        stress_level: dr.stress.labelTh,
+        raw_answers: {
           dass_answers: dass,
-        }),
+          eq_answers: eq,
+        },
       })
-      const data = (await res.json()) as { ok?: boolean; message?: string; details?: string }
-      if (!res.ok || !data.ok) {
-        setError(data.message || data.details || 'บันทึกไม่สำเร็จ กรุณาลองอีกครั้ง')
+
+      if (testResultErr) {
+        setError(`บันทึกผลคะแนนไม่สำเร็จ: ${testResultErr.message}`)
         setSaving(false)
         return
       }
+
       clearEqAnswers()
       setDone(true)
-    } catch {
-      setError('เชื่อมต่อเซิร์ฟเวอร์ไม่ได้ กรุณาลองอีกครั้ง')
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setError(`เกิดข้อผิดพลาด: ${msg}`)
     } finally {
       setSaving(false)
     }
@@ -123,25 +175,31 @@ export default function DassQuestionPage() {
       <div className="cj-home">
         <TopBar />
 
-        <main className="cj-quizQuestionMain" style={{
-          display: 'flex',
-          flexDirection: 'column',
-          background: '#fce7f3',
-          minHeight: '100vh'
-        }}>
+        <main
+          className="cj-quizQuestionMain"
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            background: '#fce7f3',
+            minHeight: '100vh',
+          }}
+        >
           <section className="cj-quizHead">
             <span className="cj-quizHeadBar" aria-hidden="true" />
             <h1>แบบทดสอบ</h1>
           </section>
           <section className="cj-quizQuestionStage">
-            <article className="cj-quizQuestionCard" style={{
-              width: 'min(900px, 100%)',
-              background: 'white',
-              display: 'flex',
-              padding: 0,
-              overflow: 'hidden',
-              alignItems: 'stretch'
-            }}>
+            <article
+              className="cj-quizQuestionCard"
+              style={{
+                width: 'min(900px, 100%)',
+                background: 'white',
+                display: 'flex',
+                padding: 0,
+                overflow: 'hidden',
+                alignItems: 'stretch',
+              }}
+            >
               <div style={{ flex: 1, minHeight: '400px' }}>
                 <img
                   src={resultImage}
@@ -149,16 +207,25 @@ export default function DassQuestionPage() {
                   style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                 />
               </div>
-              <div style={{
-                flex: 1.2,
-                padding: '40px',
-                display: 'flex',
-                flexDirection: 'column',
-                justifyContent: 'center',
-                alignItems: 'center',
-                textAlign: 'center'
-              }}>
-                <p style={{ color: '#5b2b3b', fontSize: '24px', fontWeight: '700', marginBottom: '16px' }}>
+              <div
+                style={{
+                  flex: 1.2,
+                  padding: '40px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'center',
+                  alignItems: 'center',
+                  textAlign: 'center',
+                }}
+              >
+                <p
+                  style={{
+                    color: '#5b2b3b',
+                    fontSize: '24px',
+                    fontWeight: '700',
+                    marginBottom: '16px',
+                  }}
+                >
                   พยายามได้ดีมากๆเลยเจ้าคนเก่ง
                 </p>
                 <p style={{ color: '#5b2b3b', fontSize: '20px', marginBottom: '8px' }}>
@@ -176,7 +243,7 @@ export default function DassQuestionPage() {
                     fontSize: '16px',
                     background: '#fce7f3',
                     color: '#d44b7d',
-                    fontWeight: '700'
+                    fontWeight: '700',
                   }}
                 >
                   กลับไปยังหน้าหลัก
@@ -184,16 +251,22 @@ export default function DassQuestionPage() {
               </div>
             </article>
           </section>
-          <div style={{
-            marginTop: 'auto',
-            padding: '20px 40px',
-            textAlign: 'right',
-            color: '#d44b7d',
-            fontSize: '16px',
-            fontWeight: '600'
-          }}>
+          <div
+            style={{
+              marginTop: 'auto',
+              padding: '20px 40px',
+              textAlign: 'right',
+              color: '#d44b7d',
+              fontSize: '16px',
+              fontWeight: '600',
+            }}
+          >
             ทำแบบทดสอบสำเร็จ<br />
-            {new Date().toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' })}
+            {new Date().toLocaleDateString('th-TH', {
+              day: 'numeric',
+              month: 'short',
+              year: 'numeric',
+            })}
           </div>
         </main>
         <footer className="cj-homeFooter" />
@@ -212,7 +285,7 @@ export default function DassQuestionPage() {
           backgroundSize: 'cover',
           backgroundPosition: 'center',
           backgroundRepeat: 'no-repeat',
-          minHeight: '100vh'
+          minHeight: '100vh',
         }}
       >
         <section className="cj-quizHead">
@@ -263,7 +336,11 @@ export default function DassQuestionPage() {
                 onClick={nextQuestion}
                 disabled={currentAnswer === null || saving}
               >
-                {index === DASS21_QUESTIONS_TH.length - 1 ? (saving ? 'กำลังบันทึก...' : 'ส่งคำตอบ') : 'ข้อต่อไป'}
+                {index === DASS21_QUESTIONS_TH.length - 1
+                  ? saving
+                    ? 'กำลังบันทึก...'
+                    : 'ส่งคำตอบ'
+                  : 'ข้อต่อไป'}
               </button>
             </div>
           </article>

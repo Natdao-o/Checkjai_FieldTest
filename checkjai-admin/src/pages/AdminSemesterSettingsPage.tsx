@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { adminFetch, clearTeacherSession, getTeacherToken } from '../lib/teacherSession'
+import { adminFetch } from '../lib/teacherSession'
 import '../../src/style.css'
 
 type Semester = {
@@ -13,7 +12,6 @@ type Semester = {
 }
 
 export default function AdminSemesterSettingsPage() {
-  const navigate = useNavigate()
   const [semesters, setSemesters] = useState<Semester[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -26,31 +24,25 @@ export default function AdminSemesterSettingsPage() {
 
   const loadSemesters = async () => {
     setLoading(true)
+    setError(null)
     try {
       const res = await adminFetch('/api/admin/semesters')
       const json = await res.json()
-      if (res.status === 401) {
-        clearTeacherSession()
-        navigate('/admin/login', { replace: true })
-        return
-      }
       if (res.ok && json.ok) {
-        setSemesters(json.semesters)
+        setSemesters(json.semesters || [])
+      } else {
+        setError(json.message || 'ไม่สามารถโหลดข้อมูลเทอมการศึกษาได้ในขณะนี้')
       }
     } catch {
-      setError('โหลดข้อมูลไม่สำเร็จ')
+      setError('ไม่สามารถเชื่อมต่อเซิร์ฟเวอร์เพื่อโหลดข้อมูลเทอมได้')
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    if (!getTeacherToken()) {
-      navigate('/admin/login', { replace: true })
-      return
-    }
     void loadSemesters()
-  }, [navigate])
+  }, [])
 
   const handleAdd = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -71,6 +63,9 @@ export default function AdminSemesterSettingsPage() {
         setStart('')
         setEnd('')
         void loadSemesters()
+      } else {
+        const json = await res.json()
+        setError(json.message || 'บันทึกไม่สำเร็จ')
       }
     } catch {
       setError('บันทึกไม่สำเร็จ')
@@ -99,17 +94,28 @@ export default function AdminSemesterSettingsPage() {
   return (
     <div className="aj-searchPage">
       <header className="aj-searchHeader">
-        <h1 className="aj-searchTitle">Semester Settings</h1>
+        <h1 className="aj-searchTitle">Semester Settings (ตั้งค่าภาคเรียน)</h1>
       </header>
 
-      {error && <p className="aj-searchBanner" style={{ background: '#fee2e2', color: '#991b1b' }}>{error}</p>}
+      {error && (
+        <p className="aj-searchBanner" style={{ background: '#fee2e2', color: '#991b1b', marginBottom: '16px' }}>
+          {error}
+        </p>
+      )}
 
-      <section className="aj-searchPanel">
+      <section className="aj-searchPanel" style={{ marginBottom: '24px' }}>
         <h2 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '16px', color: '#0b1139' }}>เพิ่มเทอมการศึกษาใหม่</h2>
         <form onSubmit={handleAdd} className="aj-searchGrid" style={{ alignItems: 'flex-end' }}>
           <label className="aj-searchField">
             <span>ปีการศึกษา</span>
-            <input type="text" value={year} onChange={(e) => setYear(e.target.value.replace(/\D/g, ''))} placeholder="เช่น 2569" className="aj-searchInput" required />
+            <input
+              type="text"
+              value={year}
+              onChange={(e) => setYear(e.target.value.replace(/\D/g, ''))}
+              placeholder="เช่น 2569"
+              className="aj-searchInput"
+              required
+            />
           </label>
           <label className="aj-searchField">
             <span>เทอม</span>
@@ -127,11 +133,13 @@ export default function AdminSemesterSettingsPage() {
             <span>วันที่สิ้นสุด</span>
             <input type="date" value={end} onChange={(e) => setEnd(e.target.value)} className="aj-searchInput" required />
           </label>
-          <button type="submit" className="aj-searchBtnPrimary" style={{ height: '42px' }}>บันทึกเทอมใหม่</button>
+          <button type="submit" className="aj-searchBtnPrimary" style={{ height: '42px' }}>
+            บันทึกเทอมใหม่
+          </button>
         </form>
       </section>
 
-      <section className="aj-searchPanel aj-searchPanel--table">
+      <section className="aj-searchPanel aj-searchPanel--table" style={{ margin: 0 }}>
         <h2 style={{ fontSize: '18px', fontWeight: 700, marginBottom: '16px', color: '#0b1139' }}>รายการเทอมทั้งหมด</h2>
         <div className="aj-searchTableWrap">
           <table className="aj-searchTable">
@@ -145,8 +153,20 @@ export default function AdminSemesterSettingsPage() {
               </tr>
             </thead>
             <tbody>
-              {loading && <tr><td colSpan={5} className="aj-searchTdMuted">กำลังโหลด...</td></tr>}
-              {!loading && semesters.length === 0 && <tr><td colSpan={5} className="aj-searchTdMuted">ยังไม่มีข้อมูลเทอม</td></tr>}
+              {loading && (
+                <tr>
+                  <td colSpan={5} className="aj-searchTdMuted">
+                    กำลังโหลด...
+                  </td>
+                </tr>
+              )}
+              {!loading && semesters.length === 0 && (
+                <tr>
+                  <td colSpan={5} className="aj-searchTdMuted">
+                    ยังไม่มีข้อมูลเทอมการศึกษา
+                  </td>
+                </tr>
+              )}
               {semesters.map((s) => (
                 <tr key={s.id} style={s.is_active ? { background: '#f0f7ff' } : {}}>
                   <td>{s.academic_year}</td>
@@ -156,26 +176,24 @@ export default function AdminSemesterSettingsPage() {
                   </td>
                   <td style={{ textAlign: 'center' }}>
                     {s.is_active ? (
-                      <span className="aj-statusBadge aj-statusBadge--submitted" style={{ background: '#dcfce7', color: '#166534' }}>Active</span>
+                      <span className="aj-statusBadge aj-statusBadge--submitted" style={{ background: '#dcfce7', color: '#166534' }}>
+                        Active
+                      </span>
                     ) : (
                       <span className="aj-statusBadge aj-statusBadge--pending">Inactive</span>
                     )}
                   </td>
                   <td style={{ textAlign: 'right' }}>
                     {!s.is_active && (
-                      <button 
+                      <button
                         onClick={() => handleActivate(s.id)}
-                        className="aj-searchLinkBtn" 
+                        className="aj-searchLinkBtn"
                         style={{ marginRight: '12px', color: '#1e40af', textDecoration: 'none', fontWeight: 700 }}
                       >
                         Set Active
                       </button>
                     )}
-                    <button 
-                      onClick={() => handleDelete(s.id)}
-                      className="aj-searchLinkBtn" 
-                      style={{ color: '#991b1b', textDecoration: 'none' }}
-                    >
+                    <button onClick={() => handleDelete(s.id)} className="aj-searchLinkBtn" style={{ color: '#991b1b', textDecoration: 'none' }}>
                       ลบ
                     </button>
                   </td>
