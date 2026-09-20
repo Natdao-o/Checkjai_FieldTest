@@ -4,31 +4,9 @@ import { useNavigate } from 'react-router-dom'
 import PinkShell from '../components/PinkShell'
 import { useStudent } from '../context/StudentContext'
 
-const FACULTIES_AND_MAJORS: Record<string, string[]> = {
-  'คณะวิศวกรรมศาสตร์และเทคโนโลยี': [
-    'วิศวกรรมคอมพิวเตอร์',
-    'วิศวกรรมไฟฟ้า',
-    'วิศวกรรมเครื่องกล',
-    'วิศวกรรมโยธา',
-    'วิศวกรรมอุตสาหการ',
-    'เทคโนโลยีสารสนเทศ',
-  ],
-  'คณะบริหารธุรกิจ': [
-    'การบัญชี',
-    'การตลาด',
-    'การจัดการ',
-    'การเงินและธนาคาร',
-    'ธุรกิจดิจิทัล',
-  ],
-  'คณะศิลปศาสตร์': [
-    'ภาษาอังกฤษเพื่อการสื่อสาร',
-    'ภาษาไทยเพื่อการสื่อสาร',
-    'การท่องเที่ยวและบริการ',
-    'นิเทศศาสตร์',
-  ],
-}
-
-const YEAR_LEVELS = ['ปี 1', 'ปี 2', 'ปี 3', 'ปี 4']
+const DEFAULT_FACULTY = 'คณะวิศวกรรมศาสตร์และเทคโนโลยี'
+const DEFAULT_MAJOR = 'เทคโนโลยีดิจิทัลและสารสนเทศ'
+const DEFAULT_YEAR_LEVEL = 'ปี 1'
 
 export default function LoginPage() {
   const navigate = useNavigate()
@@ -36,15 +14,7 @@ export default function LoginPage() {
 
   const [studentId, setStudentId] = useState('')
   const [fullName, setFullName] = useState('')
-  const [faculty, setFaculty] = useState('')
-  const [major, setMajor] = useState('')
-  const [yearLevel, setYearLevel] = useState('')
   const [error, setError] = useState('')
-
-  function handleFacultyChange(selectedFaculty: string) {
-    setFaculty(selectedFaculty)
-    setMajor('') // Reset major when faculty changes
-  }
 
   function onSubmit(e: FormEvent) {
     e.preventDefault()
@@ -61,33 +31,19 @@ export default function LoginPage() {
       setError('กรุณากรอกชื่อ-นามสกุล')
       return
     }
-    if (!faculty) {
-      setError('กรุณาเลือกคณะ')
-      return
-    }
-    if (!major) {
-      setError('กรุณาเลือกสาขาวิชา')
-      return
-    }
-    if (!yearLevel) {
-      setError('กรุณาเลือกชั้นปี')
-      return
-    }
 
-    // Save student profile to central State (Context + SessionStorage)
+    // Save student profile with locked defaults to central state & localStorage progress
     setStudent({
       student_id: id,
       full_name: name,
-      faculty,
-      major,
-      year_level: yearLevel,
+      faculty: DEFAULT_FACULTY,
+      major: DEFAULT_MAJOR,
+      year_level: DEFAULT_YEAR_LEVEL,
     })
 
     // Redirect to assessment page
     navigate('/quiz/question')
   }
-
-  const availableMajors = faculty ? FACULTIES_AND_MAJORS[faculty] || [] : []
 
   return (
     <PinkShell title="ข้อมูลผู้ประเมิน" subtitle="กรุณากรอกข้อมูลระบุตัวตนก่อนเริ่มทำแบบประเมิน">
@@ -124,73 +80,70 @@ export default function LoginPage() {
           />
         </div>
 
-        {/* 3. คณะ */}
+        {/* 3. คณะ (Locked / Disabled) */}
         <div className="cj-field">
           <label className="cj-label" htmlFor="faculty">
-            คณะ <span style={{ color: '#e11d48' }}>*</span>
+            คณะ
           </label>
-          <select
+          <input
             id="faculty"
             className="cj-input"
-            value={faculty}
-            onChange={(e) => handleFacultyChange(e.target.value)}
-            required
-            style={{ appearance: 'auto' }}
-          >
-            <option value="">-- เลือกคณะ --</option>
-            {Object.keys(FACULTIES_AND_MAJORS).map((fac) => (
-              <option key={fac} value={fac}>
-                {fac}
-              </option>
-            ))}
-          </select>
+            value={DEFAULT_FACULTY}
+            readOnly
+            disabled
+            style={{
+              backgroundColor: '#f8fafc',
+              color: '#475569',
+              cursor: 'not-allowed',
+              borderColor: '#cbd5e1',
+              opacity: 0.9,
+              fontWeight: 500,
+            }}
+          />
         </div>
 
-        {/* 4. สาขาวิชา */}
+        {/* 4. สาขาวิชา (Locked / Disabled) */}
         <div className="cj-field">
           <label className="cj-label" htmlFor="major">
-            สาขาวิชา <span style={{ color: '#e11d48' }}>*</span>
+            สาขาวิชา
           </label>
-          <select
+          <input
             id="major"
             className="cj-input"
-            value={major}
-            onChange={(e) => setMajor(e.target.value)}
-            required
-            disabled={!faculty}
-            style={{ appearance: 'auto' }}
-          >
-            <option value="">
-              {!faculty ? '-- กรุณาเลือกคณะก่อน --' : '-- เลือกสาขาวิชา --'}
-            </option>
-            {availableMajors.map((maj) => (
-              <option key={maj} value={maj}>
-                {maj}
-              </option>
-            ))}
-          </select>
+            value={DEFAULT_MAJOR}
+            readOnly
+            disabled
+            style={{
+              backgroundColor: '#f8fafc',
+              color: '#475569',
+              cursor: 'not-allowed',
+              borderColor: '#cbd5e1',
+              opacity: 0.9,
+              fontWeight: 500,
+            }}
+          />
         </div>
 
-        {/* 5. ชั้นปี */}
+        {/* 5. ชั้นปี (Locked / Disabled) */}
         <div className="cj-field">
           <label className="cj-label" htmlFor="yearLevel">
-            ชั้นปี <span style={{ color: '#e11d48' }}>*</span>
+            ชั้นปี
           </label>
-          <select
+          <input
             id="yearLevel"
             className="cj-input"
-            value={yearLevel}
-            onChange={(e) => setYearLevel(e.target.value)}
-            required
-            style={{ appearance: 'auto' }}
-          >
-            <option value="">-- เลือกชั้นปี --</option>
-            {YEAR_LEVELS.map((yr) => (
-              <option key={yr} value={yr}>
-                {yr}
-              </option>
-            ))}
-          </select>
+            value={DEFAULT_YEAR_LEVEL}
+            readOnly
+            disabled
+            style={{
+              backgroundColor: '#f8fafc',
+              color: '#475569',
+              cursor: 'not-allowed',
+              borderColor: '#cbd5e1',
+              opacity: 0.9,
+              fontWeight: 500,
+            }}
+          />
         </div>
 
         {/* Submit Button */}
