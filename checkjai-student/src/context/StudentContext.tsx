@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
+import { getTestProgress, saveTestProgress } from '../lib/testProgress'
 
 export interface StudentProfile {
   student_id: string
@@ -22,10 +23,15 @@ const StudentContext = createContext<StudentContextType | undefined>(undefined)
 
 export function StudentProvider({ children }: { children: ReactNode }) {
   const [student, setStudentState] = useState<StudentProfile | null>(() => {
+    if (typeof window === 'undefined') return null
     try {
       const raw = sessionStorage.getItem(STORAGE_KEY)
       if (raw) {
         return JSON.parse(raw) as StudentProfile
+      }
+      const progress = getTestProgress()
+      if (progress?.student?.student_id) {
+        return progress.student
       }
     } catch {
       // Ignore parse error
@@ -34,8 +40,10 @@ export function StudentProvider({ children }: { children: ReactNode }) {
   })
 
   useEffect(() => {
+    if (typeof window === 'undefined') return
     if (student) {
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(student))
+      saveTestProgress({ student })
     } else {
       sessionStorage.removeItem(STORAGE_KEY)
     }
@@ -43,6 +51,7 @@ export function StudentProvider({ children }: { children: ReactNode }) {
 
   const setStudent = (profile: StudentProfile) => {
     setStudentState(profile)
+    saveTestProgress({ student: profile })
   }
 
   const clearStudent = () => {

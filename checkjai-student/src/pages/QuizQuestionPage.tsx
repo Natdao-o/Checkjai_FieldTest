@@ -4,9 +4,9 @@ import { EQ_ANSWERS_KEY, saveEqAnswersJson } from '../lib/assessmentSession'
 import { EQ_CHOICES_TH as choices, EQ_QUESTIONS_TH as questions } from '../lib/eqQuestions'
 import TopBar from '../components/TopBar'
 import { useStudent } from '../context/StudentContext'
-import { getStudentId } from '../lib/auth'
 import bgImage from '../assets/images/รูปสำหรับแบบทดสอบ-6.jpg'
 import interImage from '../assets/images/รูปคั่นแบบทดสอบความฉลาดทางอารมณ์.jpg'
+import { getTestProgress, saveTestProgress } from '../lib/testProgress'
 
 function parseStoredEq52(raw: string | null): (number | null)[] | null {
   if (!raw) return null
@@ -24,18 +24,42 @@ function parseStoredEq52(raw: string | null): (number | null)[] | null {
 
 export default function QuizQuestionPage() {
   const navigate = useNavigate()
-  const [index, setIndex] = useState(0)
-  const [answers, setAnswers] = useState<(number | null)[]>(
-    () => Array.from({ length: questions.length }, () => null),
-  )
-  const { isIdentified } = useStudent()
+  const { student, isIdentified, setStudent } = useStudent()
   const [showInter, setShowInter] = useState(false)
+
+  const [index, setIndex] = useState(() => {
+    const progress = getTestProgress()
+    if (progress?.stage === 'eq' && typeof progress.currentStep === 'number') {
+      return Math.max(0, Math.min(progress.currentStep, questions.length - 1))
+    }
+    return 0
+  })
+
+  const [answers, setAnswers] = useState<(number | null)[]>(() => {
+    const progress = getTestProgress()
+    if (progress?.stage === 'eq' && Array.isArray(progress.eqAnswers) && progress.eqAnswers.length === questions.length) {
+      return progress.eqAnswers
+    }
+    return Array.from({ length: questions.length }, () => null)
+  })
 
   const currentAnswer = answers[index]
 
   useEffect(() => {
+    const progress = getTestProgress()
     if (!isIdentified) {
-      navigate('/login', { replace: true })
+      if (progress?.student?.student_id) {
+        setStudent(progress.student)
+      } else {
+        navigate('/login', { replace: true })
+        return
+      }
+    }
+
+    // If user already moved to DASS phase or finished EQ
+    if (progress?.stage === 'dass' && Array.isArray(progress.eqAnswers) && progress.eqAnswers.length === questions.length) {
+      saveEqAnswersJson(JSON.stringify(progress.eqAnswers))
+      navigate('/quiz/dass', { replace: true })
       return
     }
 
@@ -43,13 +67,18 @@ export default function QuizQuestionPage() {
     if (stored) {
       navigate('/quiz/dass', { replace: true })
     }
-  }, [isIdentified, navigate])
+  }, [isIdentified, student, setStudent, navigate])
 
   function selectChoice(choiceIndex: number) {
-    setAnswers((prev) => {
-      const next = [...prev]
-      next[index] = choiceIndex
-      return next
+    const next = [...answers]
+    next[index] = choiceIndex
+    setAnswers(next)
+
+    saveTestProgress({
+      student,
+      stage: 'eq',
+      currentStep: index,
+      eqAnswers: next,
     })
   }
 
@@ -59,15 +88,35 @@ export default function QuizQuestionPage() {
       const final = [...answers]
       final[index] = currentAnswer
       saveEqAnswersJson(JSON.stringify(final))
+      saveTestProgress({
+        student,
+        stage: 'dass',
+        currentStep: 0,
+        eqAnswers: final,
+      })
       setShowInter(true)
       return
     }
-    setIndex((prev) => prev + 1)
+    const nextIdx = index + 1
+    setIndex(nextIdx)
+    saveTestProgress({
+      student,
+      stage: 'eq',
+      currentStep: nextIdx,
+      eqAnswers: answers,
+    })
   }
 
   function prevQuestion() {
     if (index > 0) {
-      setIndex((prev) => prev - 1)
+      const prevIdx = index - 1
+      setIndex(prevIdx)
+      saveTestProgress({
+        student,
+        stage: 'eq',
+        currentStep: prevIdx,
+        eqAnswers: answers,
+      })
     }
   }
 

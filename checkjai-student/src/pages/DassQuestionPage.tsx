@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import TopBar from '../components/TopBar'
 import bgImage from '../assets/images/รูปสำหรับแบบทดสอบ-1.jpg'
 import resultImage from '../assets/images/ผลลัพธ์รูปดอกไม้.jpg'
-import { clearEqAnswers, readEqAnswersJson, EQ_ANSWERS_KEY } from '../lib/assessmentSession'
+import { clearEqAnswers, readEqAnswersJson, saveEqAnswersJson, EQ_ANSWERS_KEY } from '../lib/assessmentSession'
 import {
   DASS21_CHOICES_TH,
   DASS21_QUESTIONS_TH,
@@ -12,6 +12,7 @@ import {
 import { calculateEqTotal } from '../lib/eqScore'
 import { supabase } from '../lib/supabase'
 import { useStudent } from '../context/StudentContext'
+import { clearTestProgress, getTestProgress, saveTestProgress } from '../lib/testProgress'
 
 function parseEq52(raw: string | null): number[] | null {
   if (!raw) return null
@@ -31,12 +32,24 @@ function parseEq52(raw: string | null): number[] | null {
 
 export default function DassQuestionPage() {
   const navigate = useNavigate()
-  const { student, isIdentified } = useStudent()
+  const { student, isIdentified, setStudent } = useStudent()
 
-  const [index, setIndex] = useState(0)
-  const [answers, setAnswers] = useState<(number | null)[]>(
-    () => Array.from({ length: DASS21_QUESTIONS_TH.length }, () => null),
-  )
+  const [index, setIndex] = useState(() => {
+    const progress = getTestProgress()
+    if (progress?.stage === 'dass' && typeof progress.currentStep === 'number') {
+      return Math.max(0, Math.min(progress.currentStep, DASS21_QUESTIONS_TH.length - 1))
+    }
+    return 0
+  })
+
+  const [answers, setAnswers] = useState<(number | null)[]>(() => {
+    const progress = getTestProgress()
+    if (progress?.stage === 'dass' && Array.isArray(progress.dassAnswers) && progress.dassAnswers.length === DASS21_QUESTIONS_TH.length) {
+      return progress.dassAnswers
+    }
+    return Array.from({ length: DASS21_QUESTIONS_TH.length }, () => null)
+  })
+
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
@@ -44,22 +57,39 @@ export default function DassQuestionPage() {
   const currentAnswer = answers[index]
 
   useEffect(() => {
+    const progress = getTestProgress()
+
     if (!isIdentified || !student?.student_id) {
-      navigate('/login', { replace: true })
-      return
+      if (progress?.student?.student_id) {
+        setStudent(progress.student)
+      } else {
+        navigate('/login', { replace: true })
+        return
+      }
     }
 
-    const raw = readEqAnswersJson()
+    let raw = readEqAnswersJson()
+    if (!raw && Array.isArray(progress?.eqAnswers) && progress.eqAnswers.length === 52) {
+      // Auto-restore EQ answers from localStorage progress if sessionStorage was cleared on mobile refresh
+      saveEqAnswersJson(JSON.stringify(progress.eqAnswers))
+      raw = JSON.stringify(progress.eqAnswers)
+    }
+
     if (!parseEq52(raw)) {
       navigate('/quiz/question', { replace: true })
     }
-  }, [isIdentified, student, navigate])
+  }, [isIdentified, student, setStudent, navigate])
 
   function selectChoice(choiceIndex: number) {
-    setAnswers((prev) => {
-      const next = [...prev]
-      next[index] = choiceIndex
-      return next
+    const next = [...answers]
+    next[index] = choiceIndex
+    setAnswers(next)
+
+    saveTestProgress({
+      student,
+      stage: 'dass',
+      currentStep: index,
+      dassAnswers: next,
     })
   }
 
@@ -69,7 +99,15 @@ export default function DassQuestionPage() {
       void submitBoth(finalAnswers())
       return
     }
-    setIndex((prev) => prev + 1)
+    const nextIdx = index + 1
+    setIndex(nextIdx)
+
+    saveTestProgress({
+      student,
+      stage: 'dass',
+      currentStep: nextIdx,
+      dassAnswers: answers,
+    })
   }
 
   function finalAnswers(): number[] {
@@ -88,7 +126,12 @@ export default function DassQuestionPage() {
       return
     }
 
-    const rawEq = sessionStorage.getItem(EQ_ANSWERS_KEY)
+    let rawEq = sessionStorage.getItem(EQ_ANSWERS_KEY)
+    const progress = getTestProgress()
+    if (!rawEq && Array.isArray(progress?.eqAnswers) && progress.eqAnswers.length === 52) {
+      rawEq = JSON.stringify(progress.eqAnswers)
+    }
+
     const eq = parseEq52(rawEq)
     if (!eq) {
       setSaving(false)
@@ -155,6 +198,7 @@ export default function DassQuestionPage() {
       }
 
       clearEqAnswers()
+      clearTestProgress() // Clean up localStorage checkjai_test_progress key upon successful submit
       setDone(true)
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -166,7 +210,14 @@ export default function DassQuestionPage() {
 
   function prevQuestion() {
     if (index > 0) {
-      setIndex((prev) => prev - 1)
+      const prevIdx = index - 1
+      setIndex(prevIdx)
+      saveTestProgress({
+        student,
+        stage: 'dass',
+        currentStep: prevIdx,
+        dassAnswers: answers,
+      })
     }
   }
 
