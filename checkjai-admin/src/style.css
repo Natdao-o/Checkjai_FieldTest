@@ -2361,3 +2361,53 @@ body:has(.aj-dash) {
 .cj-glow-soft {
   filter: drop-shadow(0 0 12px rgba(212, 75, 125, 0.4));
 }
+
+/* Touch Targets & Mobile Responsiveness (Admin App) */
+.aj-searchInput,
+.aj-searchSelect,
+.aj-searchBtn {
+  min-height: 44px;
+}
+
+@media (max-width: 767.98px) {
+  html, body {
+    overflow-x: hidden;
+  }
+
+  .aj-dashMain {
+    padding: 12px 10px !important;
+  }
+
+  .aj-searchPanel {
+    padding: 16px 14px !important;
+    margin-bottom: 16px !important;
+    border-radius: 14px !important;
+  }
+
+  .aj-searchTableWrap,
+  .aj-tableContainer {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
+  }
+
+  .aj-searchGrid {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+
+  .aj-searchField {
+    width: 100%;
+  }
+
+  .aj-searchInput,
+  .aj-searchSelect {
+    width: 100%;
+    min-height: 44px;
+  }
+
+  .aj-dashGrid {
+    grid-template-columns: 1fr !important;
+    gap: 12px !important;
+  }
+}

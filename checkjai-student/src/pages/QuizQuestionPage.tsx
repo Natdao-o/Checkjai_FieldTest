@@ -98,33 +98,35 @@ export default function QuizQuestionPage() {
             <article className="cj-quizQuestionCard" style={{ 
               background: 'white', 
               borderRadius: '50%', 
-              width: '800px', 
-              height: '800px', 
+              width: 'min(800px, 90vw)', 
+              height: 'min(800px, 90vw)', 
+              maxWidth: '100%',
               display: 'flex', 
               flexDirection: 'column', 
               justifyContent: 'center', 
               alignItems: 'center',
-              boxShadow: '0 0 100px 50px white',
-              padding: '60px',
+              boxShadow: '0 0 60px 30px white',
+              padding: 'clamp(20px, 4vw, 60px)',
               textAlign: 'center',
-              border: 'none'
+              border: 'none',
+              margin: '0 auto',
             }}>
               <img 
                 src={interImage} 
                 alt="Divider" 
-                style={{ width: '220px', height: '220px', objectFit: 'contain', marginBottom: '40px' }} 
+                style={{ width: 'min(220px, 30vw)', height: 'min(220px, 30vw)', objectFit: 'contain', marginBottom: '20px' }} 
               />
-              <p style={{ color: '#5b2b3b', fontSize: '20px', marginBottom: '12px', lineHeight: '1.6', fontWeight: '500' }}>
+              <p style={{ color: '#5b2b3b', fontSize: 'min(20px, 4.2vw)', marginBottom: '12px', lineHeight: '1.5', fontWeight: '500' }}>
                 ยังเหลืออีก 1 แบบทดสอบ หัวใจและความรู้สึกของเธอเราจะขอช่วยดูแลและรับฟังเอง
               </p>
-              <p style={{ color: '#5b2b3b', fontSize: '20px', marginBottom: '50px', lineHeight: '1.6', fontWeight: '500' }}>
+              <p style={{ color: '#5b2b3b', fontSize: 'min(20px, 4.2vw)', marginBottom: '30px', lineHeight: '1.5', fontWeight: '500' }}>
                 อย่าพึ่งทิ้งเราไปไหนนะ...แบบทดสอบนี้เป็นแบบทดสอบสุขภาพจิตใจ DASS-21
               </p>
               <button 
                 type="button" 
                 className="cj-quizChoiceBtn" 
                 onClick={() => navigate('/quiz/dass')}
-                style={{ width: 'auto', padding: '14px 50px', fontSize: '20px' }}
+                style={{ width: 'auto', maxWidth: '100%', padding: '12px 30px', fontSize: 'min(20px, 4.5vw)', minHeight: '44px' }}
               >
                 ทำแบบทดสอบถัดไป
               </button>

@@ -54,28 +54,46 @@ function sumForQuestions(
   return s
 }
 
+export function getSeverityDepressionInfo(doubled: number): { severity: DassSeverity; labelTh: string; color: string } {
+  if (doubled <= 9) return { severity: 'normal', labelTh: 'ปกติ', color: '#166534' }
+  if (doubled <= 13) return { severity: 'mild', labelTh: 'เล็กน้อย', color: '#0369a1' }
+  if (doubled <= 20) return { severity: 'moderate', labelTh: 'ปานกลาง', color: '#d97706' }
+  if (doubled <= 27) return { severity: 'severe', labelTh: 'รุนแรง', color: '#dc2626' }
+  return { severity: 'extremely_severe', labelTh: 'รุนแรงมาก', color: '#7f1d1d' }
+}
+
+export function getSeverityAnxietyInfo(doubled: number): { severity: DassSeverity; labelTh: string; color: string } {
+  if (doubled <= 7) return { severity: 'normal', labelTh: 'ปกติ', color: '#166534' }
+  if (doubled <= 9) return { severity: 'mild', labelTh: 'เล็กน้อย', color: '#0369a1' }
+  if (doubled <= 14) return { severity: 'moderate', labelTh: 'ปานกลาง', color: '#d97706' }
+  if (doubled <= 19) return { severity: 'severe', labelTh: 'รุนแรง', color: '#dc2626' }
+  return { severity: 'extremely_severe', labelTh: 'รุนแรงมาก', color: '#7f1d1d' }
+}
+
+export function getSeverityStressInfo(doubled: number): { severity: DassSeverity; labelTh: string; color: string } {
+  if (doubled <= 14) return { severity: 'normal', labelTh: 'ปกติ', color: '#166534' }
+  if (doubled <= 18) return { severity: 'mild', labelTh: 'เล็กน้อย', color: '#0369a1' }
+  if (doubled <= 25) return { severity: 'moderate', labelTh: 'ปานกลาง', color: '#d97706' }
+  if (doubled <= 33) return { severity: 'severe', labelTh: 'รุนแรง', color: '#dc2626' }
+  return { severity: 'extremely_severe', labelTh: 'รุนแรงมาก', color: '#7f1d1d' }
+}
+
+export function getSeverityEqInfo(score: number): { labelTh: string; color: string } {
+  if (score <= 139) return { labelTh: 'ต่ำกว่าเกณฑ์', color: '#d97706' }
+  if (score <= 169) return { labelTh: 'อยู่ในเกณฑ์ปกติ', color: '#166534' }
+  return { labelTh: 'สูงกว่าเกณฑ์', color: '#2563eb' }
+}
+
 function severityDepression(doubled: number): DassSeverity {
-  if (doubled <= 9) return 'normal'
-  if (doubled <= 13) return 'mild'
-  if (doubled <= 20) return 'moderate'
-  if (doubled <= 27) return 'severe'
-  return 'extremely_severe'
+  return getSeverityDepressionInfo(doubled).severity
 }
 
 function severityAnxiety(doubled: number): DassSeverity {
-  if (doubled <= 7) return 'normal'
-  if (doubled <= 9) return 'mild'
-  if (doubled <= 14) return 'moderate'
-  if (doubled <= 19) return 'severe'
-  return 'extremely_severe'
+  return getSeverityAnxietyInfo(doubled).severity
 }
 
 function severityStress(doubled: number): DassSeverity {
-  if (doubled <= 14) return 'normal'
-  if (doubled <= 18) return 'mild'
-  if (doubled <= 25) return 'moderate'
-  if (doubled <= 33) return 'severe'
-  return 'extremely_severe'
+  return getSeverityStressInfo(doubled).severity
 }
 
 function pack(
@@ -154,3 +172,84 @@ export const DASS21_CHOICES_TH: readonly string[] = [
   'บ่อยครั้ง',
   'เกือบตลอดเวลา',
 ]
+
+export type RiskLevelInfo = {
+  status: string
+  bgColor: string
+  color: string
+}
+
+/**
+  * คำนวณระดับความเสี่ยงภาพรวมตามเกณฑ์ DASS-21 (Depression, Anxiety, Stress)
+  */
+export function calculateOverallRiskStatus(
+  dScore: number,
+  aScore: number,
+  sScore: number,
+  stressLevel?: string
+): RiskLevelInfo {
+  const lvl = stressLevel || ''
+
+  // 1. Extremely Severe (Extremely High Risk)
+  if (dScore >= 28 || aScore >= 20 || sScore >= 34 || lvl.includes('รุนแรงมาก') || lvl.includes('Extremely Severe')) {
+    return {
+      status: 'Extremely High Risk 🚨',
+      bgColor: '#fee2e2',
+      color: '#7f1d1d',
+    }
+  }
+
+  // 2. Severe (High Risk)
+  if (dScore >= 21 || aScore >= 15 || sScore >= 26 || lvl.includes('รุนแรง') || lvl.includes('Severe')) {
+    return {
+      status: 'High Risk 🔴',
+      bgColor: '#fee2e2',
+      color: '#991b1b',
+    }
+  }
+
+  // 3. Moderate (Moderate Risk)
+  if (dScore >= 14 || aScore >= 10 || sScore >= 19 || lvl.includes('ปานกลาง') || lvl.includes('Moderate')) {
+    return {
+      status: 'Moderate Risk 🟡',
+      bgColor: '#fef3c7',
+      color: '#92400e',
+    }
+  }
+
+  // 4. Mild (Mild Risk)
+  if (dScore >= 10 || aScore >= 8 || sScore >= 15 || lvl.includes('เล็กน้อย') || lvl.includes('Mild')) {
+    return {
+      status: 'Mild Risk 🔵',
+      bgColor: '#e0f2fe',
+      color: '#0369a1',
+    }
+  }
+
+  // 5. Normal (Low Risk)
+  return {
+    status: 'Low Risk 🟢',
+    bgColor: '#dcfce7',
+    color: '#166534',
+  }
+}
+
+export function getStatusBadgeStyle(status: string) {
+  if (status.includes('Extremely High')) {
+    return { backgroundColor: '#fee2e2', color: '#7f1d1d' }
+  }
+  if (status.includes('High Risk') || status.includes('รุนแรง')) {
+    return { backgroundColor: '#fee2e2', color: '#991b1b' }
+  }
+  if (status.includes('Moderate Risk') || status.includes('ปานกลาง') || status.includes('เฝ้าระวัง')) {
+    return { backgroundColor: '#fef3c7', color: '#92400e' }
+  }
+  if (status.includes('Mild Risk') || status.includes('เล็กน้อย')) {
+    return { backgroundColor: '#e0f2fe', color: '#0369a1' }
+  }
+  if (status.includes('Low Risk') || status.includes('ปกติ') || status.includes('ทำแบบประเมินแล้ว')) {
+    return { backgroundColor: '#dcfce7', color: '#166534' }
+  }
+  return { backgroundColor: '#f1f5f9', color: '#475569' }
+}
+

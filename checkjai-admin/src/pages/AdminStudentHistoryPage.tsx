@@ -4,6 +4,7 @@ import { supabase, supabaseAdmin } from '../lib/supabase'
 import { adminFetch, clearTeacherSession, getTeacherToken } from '../lib/teacherSession'
 import type { StudentHistoryRow, StudentProfileLite, BubbleLetterRow } from '../types/assessmentAdmin'
 
+import { getSeverityDepressionInfo, getSeverityAnxietyInfo, getSeverityStressInfo, getSeverityEqInfo } from '../lib/dass21Score'
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from 'recharts'
@@ -136,15 +137,26 @@ export default function AdminStudentHistoryPage() {
           const eq = tr.eq_score || {}
           const raw = tr.raw_answers || {}
 
+          const dDoubled = Number(dass.depression ?? 0)
+          const aDoubled = Number(dass.anxiety ?? 0)
+          const sDoubled = Number(dass.stress ?? 0)
+          const eqTotal = Number(eq.total ?? 0)
+
+          const dInfo = getSeverityDepressionInfo(dDoubled)
+          const aInfo = getSeverityAnxietyInfo(aDoubled)
+          const sInfo = getSeverityStressInfo(sDoubled)
+          const eqInfo = getSeverityEqInfo(eqTotal)
+
           return {
             id: tr.id,
             created_at: tr.created_at,
-            eq_total_score: Number(eq.total ?? 0),
+            eq_total_score: eqTotal,
             eq_answers: raw.eq_answers || [],
             dass_answers: raw.dass_answers || [],
-            dass_depression: { raw: 0, doubled: Number(dass.depression ?? 0), severity: 'normal' as any, labelTh: '' },
-            dass_anxiety: { raw: 0, doubled: Number(dass.anxiety ?? 0), severity: 'normal' as any, labelTh: '' },
-            dass_stress: { raw: 0, doubled: Number(dass.stress ?? 0), severity: 'normal' as any, labelTh: tr.stress_level || '' },
+            dass_depression: { raw: 0, doubled: dDoubled, severity: dInfo.severity, labelTh: dInfo.labelTh } as any,
+            dass_anxiety: { raw: 0, doubled: aDoubled, severity: aInfo.severity, labelTh: aInfo.labelTh } as any,
+            dass_stress: { raw: 0, doubled: sDoubled, severity: sInfo.severity, labelTh: tr.stress_level || sInfo.labelTh } as any,
+            eq_severity: eqInfo,
           }
         })
 

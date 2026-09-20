@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase, supabaseAdmin } from '../lib/supabase'
+import { calculateOverallRiskStatus, getStatusBadgeStyle } from '../lib/dass21Score'
 
 export interface DirectoryStudentRow {
   student_id: string
@@ -105,6 +106,19 @@ export default function AdminSearchPage() {
         const dass = latest?.dass_score || {}
         const eq = latest?.eq_score || {}
 
+        const d_score = latest ? Number(dass.depression ?? 0) : null
+        const a_score = latest ? Number(dass.anxiety ?? 0) : null
+        const s_score = latest ? Number(dass.stress ?? 0) : null
+
+        let status = 'ยังไม่ได้ทำแบบประเมิน'
+        if (latest) {
+          if (d_score !== null && a_score !== null && s_score !== null) {
+            status = calculateOverallRiskStatus(d_score, a_score, s_score, latest.stress_level).status
+          } else {
+            status = latest.stress_level || 'ทำแบบประเมินแล้ว'
+          }
+        }
+
         return {
           student_id: s.student_id,
           full_name: s.full_name || s.student_id,
@@ -112,10 +126,10 @@ export default function AdminSearchPage() {
           major: s.major || '-',
           year_level: s.year_level || '-',
           latest_submission_at: latest?.created_at || null,
-          status: latest ? (latest.stress_level || 'ทำแบบประเมินแล้ว') : 'ยังไม่ได้ทำแบบประเมิน',
-          d_score: latest ? Number(dass.depression ?? 0) : null,
-          a_score: latest ? Number(dass.anxiety ?? 0) : null,
-          s_score: latest ? Number(dass.stress ?? 0) : null,
+          status,
+          d_score,
+          a_score,
+          s_score,
           eq_total_score: latest ? Number(eq.total ?? 0) : null,
         }
       })
@@ -275,8 +289,8 @@ export default function AdminSearchPage() {
                         borderRadius: '9999px',
                         fontSize: '12px',
                         fontWeight: 600,
-                        backgroundColor: row.status.includes('รุนแรง') || row.status.includes('High') ? '#fee2e2' : row.latest_submission_at ? '#dcfce7' : '#f1f5f9',
-                        color: row.status.includes('รุนแรง') || row.status.includes('High') ? '#991b1b' : row.latest_submission_at ? '#166534' : '#475569',
+                        backgroundColor: getStatusBadgeStyle(row.status).backgroundColor,
+                        color: getStatusBadgeStyle(row.status).color,
                       }}
                     >
                       {row.status}

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase, supabaseAdmin } from '../lib/supabase'
+import { calculateOverallRiskStatus, getStatusBadgeStyle } from '../lib/dass21Score'
 import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, LineChart, Line
@@ -235,19 +236,14 @@ export default function AdminDashboardPage() {
 
       // Risk Students
       const riskStudents = filtered
-        .filter((r) => r.s_score >= 15 || r.d_score >= 14 || r.a_score >= 10 || r.stress_level.includes('ปานกลาง') || r.stress_level.includes('รุนแรง'))
+        .filter((r) => r.d_score >= 10 || r.a_score >= 8 || r.s_score >= 15 || (r.stress_level && !r.stress_level.includes('ปกติ')))
         .map((r) => {
-          let status = 'Moderate Risk'
-          if (r.s_score >= 26 || r.d_score >= 21 || r.stress_level.includes('รุนแรง')) {
-            status = 'High Risk 🔴'
-          } else {
-            status = 'Moderate Risk 🟡'
-          }
+          const riskInfo = calculateOverallRiskStatus(r.d_score, r.a_score, r.s_score, r.stress_level)
           return {
             student_id: r.student_id,
             full_name: r.full_name,
             faculty: r.faculty,
-            status,
+            status: riskInfo.status,
             d_score: r.d_score,
             a_score: r.a_score,
             s_score: r.s_score,
@@ -465,8 +461,8 @@ export default function AdminDashboardPage() {
                         borderRadius: '9999px',
                         fontSize: '13px',
                         fontWeight: 600,
-                        backgroundColor: student.status.includes('High Risk') ? '#fee2e2' : '#fef3c7',
-                        color: student.status.includes('High Risk') ? '#991b1b' : '#92400e',
+                        backgroundColor: getStatusBadgeStyle(student.status).backgroundColor,
+                        color: getStatusBadgeStyle(student.status).color,
                       }}
                     >
                       {student.status}
@@ -475,7 +471,7 @@ export default function AdminDashboardPage() {
                   <td>
                     <button
                       type="button"
-                      onClick={() => navigate(`/admin/search`)}
+                      onClick={() => navigate(`/admin/search/${encodeURIComponent(student.student_id)}/history`)}
                       style={{
                         background: '#3b82f6',
                         color: 'white',

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase, supabaseAdmin } from '../lib/supabase'
 import type { StudentHistoryRow, StudentProfileLite } from '../types/assessmentAdmin'
-import { DASS21_CHOICES_TH, DASS21_QUESTIONS_TH } from '../lib/dass21Score'
+import { DASS21_CHOICES_TH, DASS21_QUESTIONS_TH, getSeverityDepressionInfo, getSeverityAnxietyInfo, getSeverityStressInfo, getSeverityEqInfo } from '../lib/dass21Score'
 import { EQ_CHOICES_TH, EQ_QUESTIONS_TH } from '../lib/eqQuestions'
 import { utils, writeFile } from 'xlsx'
 
@@ -85,15 +85,26 @@ export default function AdminStudentHistoryDetailPage() {
           const eq = tr.eq_score || {}
           const raw = tr.raw_answers || {}
 
+          const dDoubled = Number(dass.depression ?? 0)
+          const aDoubled = Number(dass.anxiety ?? 0)
+          const sDoubled = Number(dass.stress ?? 0)
+          const eqTotal = Number(eq.total ?? 0)
+
+          const dInfo = getSeverityDepressionInfo(dDoubled)
+          const aInfo = getSeverityAnxietyInfo(aDoubled)
+          const sInfo = getSeverityStressInfo(sDoubled)
+          const eqInfo = getSeverityEqInfo(eqTotal)
+
           return {
             id: tr.id,
             created_at: tr.created_at,
-            eq_total_score: Number(eq.total ?? 0),
+            eq_total_score: eqTotal,
             eq_answers: raw.eq_answers || [],
             dass_answers: raw.dass_answers || [],
-            dass_depression: { raw: 0, doubled: Number(dass.depression ?? 0), severity: 'normal' as any, labelTh: '' },
-            dass_anxiety: { raw: 0, doubled: Number(dass.anxiety ?? 0), severity: 'normal' as any, labelTh: '' },
-            dass_stress: { raw: 0, doubled: Number(dass.stress ?? 0), severity: 'normal' as any, labelTh: tr.stress_level || '' },
+            dass_depression: { raw: 0, doubled: dDoubled, severity: dInfo.severity, labelTh: dInfo.labelTh, color: dInfo.color } as any,
+            dass_anxiety: { raw: 0, doubled: aDoubled, severity: aInfo.severity, labelTh: aInfo.labelTh, color: aInfo.color } as any,
+            dass_stress: { raw: 0, doubled: sDoubled, severity: sInfo.severity, labelTh: tr.stress_level || sInfo.labelTh, color: sInfo.color } as any,
+            eq_severity: eqInfo,
           }
         })
 
@@ -253,19 +264,30 @@ export default function AdminStudentHistoryDetailPage() {
           <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '8px', borderLeft: '4px solid #3b82f6' }}>
             <span style={{ fontSize: '13px', color: '#64748b' }}>ภาวะซึมเศร้า (Depression)</span>
             <div style={{ fontSize: '24px', fontWeight: 700, color: '#1e293b' }}>{currentRecord.dass_depression?.doubled ?? 0} คะแนน</div>
+            <div style={{ fontSize: '12px', color: (currentRecord.dass_depression as any)?.color || '#d97706', marginTop: '4px', fontWeight: 600 }}>
+              ระดับ: {currentRecord.dass_depression?.labelTh || 'ปกติ'}
+            </div>
           </div>
           <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '8px', borderLeft: '4px solid #10b981' }}>
             <span style={{ fontSize: '13px', color: '#64748b' }}>ภาวะวิตกกังวล (Anxiety)</span>
             <div style={{ fontSize: '24px', fontWeight: 700, color: '#1e293b' }}>{currentRecord.dass_anxiety?.doubled ?? 0} คะแนน</div>
+            <div style={{ fontSize: '12px', color: (currentRecord.dass_anxiety as any)?.color || '#d97706', marginTop: '4px', fontWeight: 600 }}>
+              ระดับ: {currentRecord.dass_anxiety?.labelTh || 'ปกติ'}
+            </div>
           </div>
           <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '8px', borderLeft: '4px solid #f59e0b' }}>
             <span style={{ fontSize: '13px', color: '#64748b' }}>ความเครียด (Stress)</span>
             <div style={{ fontSize: '24px', fontWeight: 700, color: '#1e293b' }}>{currentRecord.dass_stress?.doubled ?? 0} คะแนน</div>
-            <div style={{ fontSize: '12px', color: '#d97706', marginTop: '4px' }}>ระดับ: {currentRecord.dass_stress?.labelTh || 'ปกติ'}</div>
+            <div style={{ fontSize: '12px', color: (currentRecord.dass_stress as any)?.color || '#d97706', marginTop: '4px', fontWeight: 600 }}>
+              ระดับ: {currentRecord.dass_stress?.labelTh || 'ปกติ'}
+            </div>
           </div>
           <div style={{ padding: '16px', background: '#f8fafc', borderRadius: '8px', borderLeft: '4px solid #8b5cf6' }}>
             <span style={{ fontSize: '13px', color: '#64748b' }}>คะแนนรวม EQ</span>
             <div style={{ fontSize: '24px', fontWeight: 700, color: '#1e293b' }}>{currentRecord.eq_total_score ?? 0} คะแนน</div>
+            <div style={{ fontSize: '12px', color: (currentRecord as any)?.eq_severity?.color || '#166534', marginTop: '4px', fontWeight: 600 }}>
+              ระดับ: {(currentRecord as any)?.eq_severity?.labelTh || 'อยู่ในเกณฑ์ปกติ'}
+            </div>
           </div>
         </div>
       </section>

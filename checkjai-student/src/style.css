@@ -2361,3 +2361,93 @@ body:has(.aj-dash) {
 .cj-glow-soft {
   filter: drop-shadow(0 0 12px rgba(212, 75, 125, 0.4));
 }
+
+/* Touch Targets & Mobile Responsiveness (Student App) */
+.cj-input,
+select.cj-input,
+.cj-btn,
+.cj-quizChoiceBtn,
+.cj-quizSmallBtn {
+  min-height: 44px;
+}
+
+@media (max-width: 767.98px) {
+  html, body {
+    overflow-x: hidden;
+  }
+
+  .cj-page {
+    padding: 16px 12px;
+  }
+
+  .cj-card {
+    width: 100%;
+    border-radius: 16px;
+  }
+
+  .cj-header {
+    padding: 16px 14px 10px;
+  }
+
+  .cj-body {
+    padding: 14px;
+  }
+
+  .cj-form {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    width: 100%;
+  }
+
+  .cj-field {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .cj-input {
+    width: 100%;
+    min-height: 44px;
+    font-size: 15px;
+    padding: 10px 14px;
+    box-sizing: border-box;
+  }
+
+  .cj-btn,
+  .cj-btnPrimary {
+    width: 100%;
+    min-height: 44px;
+    font-size: 16px;
+  }
+
+  .cj-quizQuestionStage {
+    padding: 16px 12px 24px;
+  }
+
+  .cj-quizQuestionCard {
+    width: 100%;
+    padding: 20px 16px;
+    border-radius: 16px;
+    box-sizing: border-box;
+  }
+
+  .cj-quizQuestionText {
+    font-size: 18px;
+    line-height: 1.5;
+  }
+
+  .cj-quizChoiceList {
+    margin-top: 20px;
+    gap: 12px;
+  }
+
+  .cj-quizChoiceBtn {
+    width: 100%;
+    min-height: 44px;
+    font-size: 17px;
+    padding: 12px 16px;
+    border-radius: 14px;
+    box-sizing: border-box;
+  }
+}
